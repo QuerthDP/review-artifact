@@ -94,6 +94,7 @@ header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 .ghc { border-top: 1px solid var(--line-soft); padding: 6px 0; font-size: 13px; }
 .ghwho { font-size: 12px; color: var(--muted); } .ghwho b { color: var(--fg); }
 .ghbody { overflow-wrap: anywhere; } .ghbody img { max-width: 100%; height: auto; vertical-align: middle; } .ghbody pre { overflow-x: auto; } .ghbody details { margin: 4px 0; }
+.fbmenu { position: fixed; z-index: 50; display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 30px rgba(0,0,0,.18); }
 .discussion .pending { font-size: 12px; color: var(--muted); font-style: italic; }
 .discussion { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; border-top: 1px dashed var(--line, #ccc); padding-top: 8px; }
 .note { margin-top: 8px; background: var(--posted-soft); border-radius: 6px; padding: 6px 10px; font-size: 12px; }
@@ -296,7 +297,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     if (sending) return; sending = true;
     const id = 'q_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
     const t = { id, kind: anchor.kind || 'question', commit: anchor.commit, path: anchor.path || null, line: anchor.line || null, side: anchor.side || null, status: 'asked', messages: [{ role: 'user', text, at: new Date().toISOString() }], createdAt: new Date().toISOString() };
-    const shellThreadId = await notifyClaude(t, text, el, t.kind === 'modify' ? 'modify request' : 'page question');
+    const shellThreadId = await notifyClaude(t, text, el, t.kind === 'modify' ? 'modify request' : t.kind === 'feedback' ? 'feedback request' : 'page question');
     const ok = await writeThread(id, Object.assign({}, t, { shellThreadId }), true);
     sending = false;
     if (ok) { openAsk = null; toast(shellThreadId ? 'Sent to Claude' : 'Question saved'); }
@@ -312,9 +313,9 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   function askComposer(anchor, el) {
     const d = document.createElement('div'); d.className = 'composer'; d.style.borderColor = 'var(--posted)';
     const where = anchor.path ? anchor.path + (anchor.line ? ':' + anchor.line : '') : 'commit ' + COMMITS[anchor.commitIdx].short;
-    const mod = anchor.kind === 'modify';
-    const hint = mod ? 'Ask Claude to change · ' + esc(where) + ' · ' + (PR_MINE ? 'your PR: Claude edits the code and commits it locally (the previous version is kept); nothing is pushed' : 'Claude drafts a <code>```suggestion</code> comment for you to queue') : 'Ask Claude · ' + esc(where) + ' · the question and answer stay here on the page';
-    d.innerHTML = '<div class="hint">' + hint + '</div><textarea id="ask-ta" placeholder="' + (mod ? 'What should change here?' : 'What do you want to know about this code?') + '"></textarea><div class="actions"><button class="btn primary small" id="ask-send">' + (mod ? 'Ask Claude to change it' : 'Ask Claude') + '</button><button class="btn small" id="ask-cancel">Cancel</button></div>';
+    const mod = anchor.kind === 'modify', fb = anchor.kind === 'feedback';
+    const hint = fb ? 'Feedback on the review tool · Claude writes it up and files an issue on <a href="https://github.com/' + FEEDBACK_REPO + '" target="_blank" rel="noopener">' + FEEDBACK_REPO + '</a>, then links it here' : mod ? 'Ask Claude to change · ' + esc(where) + ' · ' + (PR_MINE ? 'your PR: Claude edits the code and commits it locally (the previous version is kept); nothing is pushed' : 'Claude drafts a <code>```suggestion</code> comment for you to queue') : 'Ask Claude · ' + esc(where) + ' · the question and answer stay here on the page';
+    d.innerHTML = '<div class="hint">' + hint + '</div><textarea id="ask-ta" placeholder="' + (fb ? 'What bothers you about the tool, or what is missing?' : mod ? 'What should change here?' : 'What do you want to know about this code?') + '"></textarea><div class="actions"><button class="btn primary small" id="ask-send">' + (fb ? 'Send to Claude' : mod ? 'Ask Claude to change it' : 'Ask Claude') + '</button><button class="btn small" id="ask-cancel">Cancel</button></div>';
     if (mod) d.style.borderColor = 'var(--proposed)';
     d.querySelector('#ask-send').onclick = () => { const v = d.querySelector('#ask-ta').value.trim(); if (v) sendQuestion(anchor, v, el); };
     d.querySelector('#ask-cancel').onclick = () => { openAsk = null; renderAll(); };
@@ -325,7 +326,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     const d = document.createElement('div'); d.className = 'chat';
     const msgs = (t.messages || []).map(m => '<div class="msg-row ' + m.role + '"><span class="who">' + (m.role === 'claude' ? 'Claude' : 'You') + '</span><div class="body">' + md(m.text) + '</div></div>').join('');
     const pending = t.status === 'asked' ? '<div class="pending">Waiting for Claude' + (t.shellThreadId ? '' : ' (not notified: tell Claude in chat to answer page questions)') + '</div>' : '';
-    d.innerHTML = '<div class="card-head"><b>' + (t.kind === 'modify' ? 'Change request to Claude' : 'Conversation with Claude') + '</b>' + (t.path ? '' : '<span>commit-level</span>') + '</div>' + msgs + pending + '<div class="followup"><textarea id="fu-' + t.id + '" placeholder="Follow up"></textarea><button class="btn small ask" data-act="followup">Send</button></div>';
+    d.innerHTML = '<div class="card-head"><b>' + (t.kind === 'modify' ? 'Change request to Claude' : t.kind === 'feedback' ? 'Feedback on the tool' : 'Conversation with Claude') + '</b>' + (t.path ? '' : '<span>commit-level</span>') + '</div>' + msgs + pending + '<div class="followup"><textarea id="fu-' + t.id + '" placeholder="Follow up"></textarea><button class="btn small ask" data-act="followup">Send</button></div>';
     d.querySelector('[data-act="followup"]').onclick = () => { const ta = d.querySelector('#fu-' + t.id); const v = ta.value.trim(); if (v) sendFollowUp(t, v, el); };
     return d;
   }
@@ -708,11 +709,22 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   renderMode();
   // Feedback on the tool itself: a new GitHub issue on the tool's repo, prefilled with where the viewer was.
   const FEEDBACK_REPO = 'QuerthDP/review-artifact';
-  document.getElementById('feedback').onclick = () => {
+  function openIssue() {
     const c = COMMITS[current];
     const body = '## What happened\n\n\n## What I expected\n\n\n---\nPage: ' + document.title + ' · ' + REPO.replace('https://github.com/', '') + ' · commit ' + c.short + ' · ' + viewMode + ' view · ' + new Date().toISOString().slice(0, 10) + '\n';
     const url = 'https://github.com/' + FEEDBACK_REPO + '/issues/new?title=' + encodeURIComponent('Feedback: ') + '&body=' + encodeURIComponent(body);
     const a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
+  }
+  // The Feedback button offers two routes: write the issue yourself, or tell Claude and let it file one.
+  document.getElementById('feedback').onclick = e => {
+    const old = document.getElementById('fb-menu'); if (old) { old.remove(); return; }
+    const m = document.createElement('div'); m.id = 'fb-menu'; m.className = 'fbmenu';
+    m.innerHTML = '<button class="btn small" data-fb="issue">Open a new GitHub issue</button><button class="btn small ask" data-fb="claude">Tell Claude, it writes the issue</button>';
+    const r = e.currentTarget.getBoundingClientRect(); m.style.top = (r.bottom + 6) + 'px'; m.style.right = Math.max(16, window.innerWidth - r.right) + 'px';
+    m.querySelector('[data-fb="issue"]').onclick = () => { m.remove(); openIssue(); };
+    m.querySelector('[data-fb="claude"]').onclick = () => { m.remove(); askAbout({ commit: COMMITS[current].sha, commitIdx: current, kind: 'feedback' }); };
+    document.body.appendChild(m);
+    setTimeout(() => document.addEventListener('click', function off(ev) { if (!m.contains(ev.target)) { m.remove(); document.removeEventListener('click', off); } }), 0);
   };
   function renderQueueToggle() { const hidden = lsGet('queuehidden') === '1'; document.body.classList.toggle('queue-hidden', hidden); document.getElementById('queuetoggle').textContent = hidden ? 'Show queue' : 'Hide queue'; }
   document.getElementById('queuetoggle').onclick = () => { lsSet('queuehidden', lsGet('queuehidden') === '1' ? '0' : '1'); renderQueueToggle(); measureHead(); };

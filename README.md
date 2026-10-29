@@ -26,6 +26,6 @@ Requirements: `gh` (authenticated), `git`, `python3`, and a claude.ai account wi
 
 ## Feedback
 
-Use the **Feedback** button on any review page: it opens a new issue here, prefilled with the page context. Or [open one directly](https://github.com/QuerthDP/review-artifact/issues/new).
+Use the **Feedback** button on any review page: open a prefilled issue here yourself, or tell Claude what bothers you and it files the issue. Or [open one directly](https://github.com/QuerthDP/review-artifact/issues/new).
 
 <a href="https://claude.com/claude-code"><img alt="Generated with Claude Code" src="https://img.shields.io/badge/Generated%20with-Claude%20Code-D97757?style=for-the-badge&logo=claude&logoColor=white"></a>
