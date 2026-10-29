@@ -698,7 +698,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     const el = document.getElementById('queue'); el.innerHTML = '<h2>Review queue</h2>';
     const all = Object.values(comments).sort((a, b) => (a.commit === b.commit ? 0 : COMMITS.findIndex(c => c.sha === a.commit) - COMMITS.findIndex(c => c.sha === b.commit)) || (a.path || '').localeCompare(b.path || '') || (a.line || 0) - (b.line || 0));
     if (!all.length && !Object.keys(threads).length) { el.innerHTML += '<div class="empty">' + (dbReady ? 'No comments yet. Hover a diff line and press + to add one.' : 'Loading comments…') + '</div>'; return; }
-    const allConvs = Object.values(threads), hiddenN = allConvs.filter(t => t.dismissed).length;
+    const allConvs = Object.values(threads).filter(t => !(t.kind === 'feedback' && t.status === 'answered')), hiddenN = allConvs.filter(t => t.dismissed).length;
     const convs = allConvs.filter(visibleThread);
     if (allConvs.length) {
       const g = document.createElement('div'); g.className = 'qgroup';
@@ -770,14 +770,17 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     document.body.appendChild(p); setTimeout(() => p.querySelector('#sub-body').focus(), 0);
   }
   // Feedback conversations with Claude live in a panel by the Feedback button, never in the diff.
-  let fbOpen = false;
+  let fbOpen = false, showFbDone = false;
   function renderFeedback() {
     const old = document.getElementById('fb-panel'); const draft = old && old.querySelector('#ask-ta') ? old.querySelector('#ask-ta').value : '';
     if (old) old.remove(); if (!fbOpen) return;
     const p = document.createElement('div'); p.id = 'fb-panel'; p.className = 'fbpanel';
     p.innerHTML = '<div class="fbpanel-head"><b>Feedback on the review tool</b><button class="btn small" aria-label="Close feedback">✕</button></div>';
     p.querySelector('.fbpanel-head button').onclick = () => { fbOpen = false; renderFeedback(); };
-    Object.values(threads).filter(t => t.kind === 'feedback' && visibleThread(t)).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')).forEach(t => p.appendChild(threadCard(t, document.getElementById('feedback'))));
+    // Answered feedback (fixed, or an issue filed) is dismissed on its own; a link brings it back.
+    const fbAll = Object.values(threads).filter(t => t.kind === 'feedback'), fbDone = fbAll.filter(t => t.status === 'answered').length;
+    if (fbDone) { const l = document.createElement('button'); l.className = 'btn small'; l.textContent = showFbDone ? 'Hide resolved feedback' : 'Show ' + fbDone + ' resolved'; l.onclick = () => { showFbDone = !showFbDone; renderFeedback(); }; p.appendChild(l); }
+    fbAll.filter(t => (showFbDone || t.status !== 'answered') && visibleThread(t)).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')).forEach(t => p.appendChild(threadCard(t, document.getElementById('feedback'))));
     const comp = askComposer({ commit: COMMITS[current].sha, commitIdx: current, kind: 'feedback' }, document.getElementById('feedback'));
     comp.querySelector('#ask-cancel').onclick = () => { fbOpen = false; renderFeedback(); };
     if (draft) comp.querySelector('#ask-ta').value = draft;
