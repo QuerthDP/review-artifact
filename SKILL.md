@@ -14,7 +14,7 @@ Files in this skill dir: `template.html` (the page), `scripts/mkdiff.py`, `scrip
 1. Fetch the PR: `gh pr view <N> -R <repo> --json number,title,author,headRefOid,baseRefOid,id`. Fetch the head locally (`git fetch <remote> pull/<N>/head:pr-<N>`); base = merge-base with the base branch.
 2. `python3 -I scripts/mkdiff.py <repo_dir> <base> pr-<N> $S/diff.json`
 3. `python3 -I scripts/ghthreads.py <repo_dir> <owner/repo> <N> $S/diff.json $S/gh.json` — other reviewers' review threads (anchored with `git blame` to the PR commit that last changed their line) and the PR conversation.
-4. `$S/meta.json`: `{"title": "PR <N> Commit Review", "repo": "<owner/repo>", "pr": <N>, "pr_title": "...", "mine": <PR author == gh api user>, "collapsed": ["Cargo.lock", ...]}` (lockfiles/generated files start collapsed).
+4. `$S/meta.json`: `{"repo": "<owner/repo>", "pr": <N>, "pr_title": "...", "author": "<PR author login>", "mine": <PR author == gh api user>, "collapsed": ["Cargo.lock", ...]}` (lockfiles/generated files start collapsed). The page is titled `[<owner/repo>#<N>] <PR title> (by <author>)`; build.py derives it.
 5. `python3 -I scripts/build.py template.html $S/diff.json $S/meta.json $S/pr<N>-review.html $S/gh.json`
 6. Syntax-check: `node -e` with `new Function` over each `<script>` body.
 7. Publish with the Artifact tool, `capabilities: {"db": {}, "user": {}, "comments": {}}`, icon `code`. Republish the same file path for every later change (same URL). Rerun steps 3 and 5 to refresh reviewer threads.
