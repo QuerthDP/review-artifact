@@ -305,7 +305,11 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     const shellThreadId = await notifyClaude(t, text, el, t.kind === 'modify' ? 'modify request' : t.kind === 'feedback' ? 'feedback request' : 'page question');
     const ok = await writeThread(id, Object.assign({}, t, { shellThreadId }), true);
     sending = false;
-    if (ok) { openAsk = null; toast(shellThreadId ? 'Sent to Claude' : 'Question saved'); }
+    if (ok) {
+      openAsk = null; toast(shellThreadId ? 'Sent to Claude' : 'Question saved');
+      // The feedback panel keeps unsent drafts across re-renders; a sent message must not come back.
+      if (t.kind === 'feedback') { const ta = document.querySelector('#fb-panel #ask-ta'); if (ta) ta.value = ''; renderFeedback(); }
+    }
   }
   async function sendFollowUp(t, text, el) {
     if (sending) return; sending = true;
