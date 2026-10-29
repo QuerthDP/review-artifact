@@ -94,6 +94,8 @@ header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 .ghc { border-top: 1px solid var(--line-soft); padding: 6px 0; font-size: 13px; }
 .ghwho { font-size: 12px; color: var(--muted); } .ghwho b { color: var(--fg); }
 .ghbody { overflow-wrap: anywhere; } .ghbody img { max-width: 100%; height: auto; vertical-align: middle; } .ghbody pre { overflow-x: auto; } .ghbody details { margin: 4px 0; }
+.fbpanel { position: fixed; right: 16px; top: calc(var(--head-h, 60px) + 8px); width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - var(--head-h, 60px) - 24px); overflow: auto; z-index: 45; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.18); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.fbpanel-head { display: flex; align-items: center; justify-content: space-between; }
 .fbmenu { position: fixed; z-index: 50; display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 30px rgba(0,0,0,.18); }
 .discussion .pending { font-size: 12px; color: var(--muted); font-style: italic; }
 .discussion { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; border-top: 1px dashed var(--line, #ccc); padding-top: 8px; }
@@ -271,7 +273,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   let openAsk = null;          // {commit, commitIdx, path, line, side} for the in-page "Ask Claude" composer
   let sending = false;
 
-  function threadsAt(sha, path, refs) { return Object.values(threads).filter(t => t.commit === sha && t.path === path && (!refs || refs.some(r => t.line === r.line && (t.side || 'RIGHT') === r.side))); }
+  function threadsAt(sha, path, refs) { return Object.values(threads).filter(t => t.kind !== 'feedback' && t.commit === sha && t.path === path && (!refs || refs.some(r => t.line === r.line && (t.side || 'RIGHT') === r.side))); }
   async function writeThread(id, data, isNew) {
     if (!db) { toast('Store unavailable'); return false; }
     try { if (isNew) await db.collection('threads').doc(id).set(data); else await db.collection('threads').doc(id).update(data); return true; }
@@ -314,7 +316,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     const d = document.createElement('div'); d.className = 'composer'; d.style.borderColor = 'var(--posted)';
     const where = anchor.path ? anchor.path + (anchor.line ? ':' + anchor.line : '') : 'commit ' + COMMITS[anchor.commitIdx].short;
     const mod = anchor.kind === 'modify', fb = anchor.kind === 'feedback';
-    const hint = fb ? 'Feedback on the review tool · Claude writes it up and files an issue on <a href="https://github.com/' + FEEDBACK_REPO + '" target="_blank" rel="noopener">' + FEEDBACK_REPO + '</a>, then links it here' : mod ? 'Ask Claude to change · ' + esc(where) + ' · ' + (PR_MINE ? 'your PR: Claude edits the code and commits it locally (the previous version is kept); nothing is pushed' : 'Claude drafts a <code>```suggestion</code> comment for you to queue') : 'Ask Claude · ' + esc(where) + ' · the question and answer stay here on the page';
+    const hint = fb ? 'Claude writes it up and files an issue on <a href="https://github.com/' + FEEDBACK_REPO + '" target="_blank" rel="noopener">' + FEEDBACK_REPO + '</a>, then links it here' : mod ? 'Ask Claude to change · ' + esc(where) + ' · ' + (PR_MINE ? 'your PR: Claude edits the code and commits it locally (the previous version is kept); nothing is pushed' : 'Claude drafts a <code>```suggestion</code> comment for you to queue') : 'Ask Claude · ' + esc(where) + ' · the question and answer stay here on the page';
     d.innerHTML = '<div class="hint">' + hint + '</div><textarea id="ask-ta" placeholder="' + (fb ? 'What bothers you about the tool, or what is missing?' : mod ? 'What should change here?' : 'What do you want to know about this code?') + '"></textarea><div class="actions"><button class="btn primary small" id="ask-send">' + (fb ? 'Send to Claude' : mod ? 'Ask Claude to change it' : 'Ask Claude') + '</button><button class="btn small" id="ask-cancel">Cancel</button></div>';
     if (mod) d.style.borderColor = 'var(--proposed)';
     d.querySelector('#ask-send').onclick = () => { const v = d.querySelector('#ask-ta').value.trim(); if (v) sendQuestion(anchor, v, el); };
@@ -531,7 +533,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
         GH.conversation.map(c => '<div class="ghc"><div class="ghwho"><b>' + esc(c.author) + '</b> <span>' + esc(c.kind) + ' · ' + esc((c.at || '').slice(0, 10)) + '</span> <a href="' + esc(c.url) + '" target="_blank" rel="noopener">open</a></div><div class="ghbody">' + cleanHTML(c.html) + '</div></div>').join('');
       g.appendChild(pc);
     }
-    if (openAsk && openAsk.commitIdx === current && !openAsk.path) g.appendChild(askComposer(openAsk, h2));
+    if (openAsk && openAsk.commitIdx === current && !openAsk.path && openAsk.kind !== 'feedback') g.appendChild(askComposer(openAsk, h2));
     if (orphan.length) { const h = document.createElement('div'); h.className = 'empty'; h.textContent = 'Anchored to files not in this commit:'; g.appendChild(h); orphan.forEach(x => g.appendChild(card(x))); }
     if (openComposer && openComposer.commitIdx === current && !openComposer.path && !openComposer.replyTo) g.appendChild(composer(openComposer));
     else {
@@ -679,7 +681,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
         const ci = COMMITS.findIndex(c => c.sha === t.commit); const first = (t.messages && t.messages[0] && t.messages[0].text) || '';
         const b = document.createElement('button'); b.className = 'qitem';
         b.innerHTML = '<div class="where">' + (ci + 1) + ' · ' + esc(t.path ? t.path + (t.line ? ':' + t.line : '') : 'commit-level') + (t.status === 'asked' ? ' · waiting' : '') + '</div><div class="snip">' + esc(first.split('\n')[0]) + '</div>';
-        b.onclick = () => { go(ci); setTimeout(() => { const el = t.path && t.line ? document.querySelector('[data-ids~="' + rowId(ci, t.path, t.line, t.side || 'RIGHT') + '"]') : document.getElementById('commit'); if (el) { const sec = el.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; } el.scrollIntoView({ block: 'center' }); flashRow(el); } }, 0); };
+        b.onclick = () => { if (t.kind === 'feedback') { fbOpen = true; renderFeedback(); return; } go(ci); setTimeout(() => { const el = t.path && t.line ? document.querySelector('[data-ids~="' + rowId(ci, t.path, t.line, t.side || 'RIGHT') + '"]') : document.getElementById('commit'); if (el) { const sec = el.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; } el.scrollIntoView({ block: 'center' }); flashRow(el); } }, 0); };
         g.appendChild(b);
       });
       el.appendChild(g);
@@ -699,7 +701,21 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     });
   }
 
-  function renderAll() { renderStepper(); renderCommit(); renderFiles(); renderQueue(); measureHead(); }
+  function renderAll() { renderStepper(); renderCommit(); renderFiles(); renderQueue(); measureHead(); renderFeedback(); }
+  // Feedback conversations with Claude live in a panel by the Feedback button, never in the diff.
+  let fbOpen = false;
+  function renderFeedback() {
+    const old = document.getElementById('fb-panel'); const draft = old && old.querySelector('#ask-ta') ? old.querySelector('#ask-ta').value : '';
+    if (old) old.remove(); if (!fbOpen) return;
+    const p = document.createElement('div'); p.id = 'fb-panel'; p.className = 'fbpanel';
+    p.innerHTML = '<div class="fbpanel-head"><b>Feedback on the review tool</b><button class="btn small" aria-label="Close feedback">✕</button></div>';
+    p.querySelector('.fbpanel-head button').onclick = () => { fbOpen = false; renderFeedback(); };
+    Object.values(threads).filter(t => t.kind === 'feedback').sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')).forEach(t => p.appendChild(threadCard(t, document.getElementById('feedback'))));
+    const comp = askComposer({ commit: COMMITS[current].sha, commitIdx: current, kind: 'feedback' }, document.getElementById('feedback'));
+    comp.querySelector('#ask-cancel').onclick = () => { fbOpen = false; renderFeedback(); };
+    if (draft) comp.querySelector('#ask-ta').value = draft;
+    p.appendChild(comp); document.body.appendChild(p);
+  }
   function measureHead() { document.documentElement.style.setProperty('--head-h', document.getElementById('top').offsetHeight + 'px'); }
   function go(i) { if (i < 0 || i >= COMMITS.length) return; current = i; cursorId = null; openComposer = null; editing = null; location.hash = 'commit-' + (i + 1); renderAll(); window.scrollTo({ top: 0 }); }
   function fromHash() { const m = /^#commit-(\d+)$/.exec(location.hash); const i = m ? parseInt(m[1], 10) - 1 : 0; if (i >= 0 && i < COMMITS.length && i !== current) { current = i; openComposer = null; editing = null; renderAll(); } }
@@ -722,7 +738,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     m.innerHTML = '<button class="btn small" data-fb="issue">Open a new GitHub issue</button><button class="btn small ask" data-fb="claude">Tell Claude, it writes the issue</button>';
     const r = e.currentTarget.getBoundingClientRect(); m.style.top = (r.bottom + 6) + 'px'; m.style.right = Math.max(16, window.innerWidth - r.right) + 'px';
     m.querySelector('[data-fb="issue"]').onclick = () => { m.remove(); openIssue(); };
-    m.querySelector('[data-fb="claude"]').onclick = () => { m.remove(); askAbout({ commit: COMMITS[current].sha, commitIdx: current, kind: 'feedback' }); };
+    m.querySelector('[data-fb="claude"]').onclick = () => { m.remove(); fbOpen = true; renderFeedback(); };
     document.body.appendChild(m);
     setTimeout(() => document.addEventListener('click', function off(ev) { if (!m.contains(ev.target)) { m.remove(); document.removeEventListener('click', off); } }), 0);
   };
