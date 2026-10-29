@@ -897,8 +897,8 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     if (fbOpen) { closeFeedback(); return; }
     fbOpen = true; if (subOpen) { subOpen = false; renderSubmit(); }
     renderFeedback();
-    // A click goes straight to typing; the f key leaves j / l free to move between items.
-    if (e && e.type === 'click') setTimeout(() => { const ta = document.querySelector('#fb-panel #ask-ta'); if (ta) ta.focus(); }, 0);
+    // Opening the panel, by click or by the f key, goes straight to typing.
+    setTimeout(() => { const ta = document.querySelector('#fb-panel #ask-ta'); if (ta) ta.focus(); }, 0);
   }
   document.getElementById('feedback').onclick = toggleFeedback;
   // A fresh Claude review of the whole PR: the first click arms, the second sends; its findings arrive as proposed comments.
