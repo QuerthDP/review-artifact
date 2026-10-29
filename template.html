@@ -95,6 +95,8 @@ header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 .ghwho { font-size: 12px; color: var(--muted); } .ghwho b { color: var(--fg); }
 .ghbody { overflow-wrap: anywhere; } .ghbody img { max-width: 100%; height: auto; vertical-align: middle; } .ghbody pre { overflow-x: auto; } .ghbody details { margin: 4px 0; }
 .fbpanel { position: fixed; right: 16px; top: calc(var(--head-h, 60px) + 8px); width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - var(--head-h, 60px) - 24px); overflow: auto; z-index: 45; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.18); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.subev { display: flex; gap: 14px; font-size: 13px; } .subconv { font-size: 13px; }
+#sub-body { min-height: 70px; }
 .fbpanel-head { display: flex; align-items: center; justify-content: space-between; }
 .chat .card-head .dismiss { margin-left: auto; }
 .fbmenu { position: fixed; z-index: 50; display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 30px rgba(0,0,0,.18); }
@@ -211,13 +213,14 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     <div class="nav">
       <button class="btn small" id="mode" aria-label="Toggle split or unified diff">Unified</button>
       <button class="btn small" id="queuetoggle" aria-label="Show or hide the review queue">Hide queue</button>
+      <button class="btn small primary" id="submitrev" aria-label="Submit your GitHub review">Submit review</button>
       <button class="btn small" id="feedback" aria-label="Send feedback about this review tool">Feedback</button>
       <button class="btn small" id="prev" aria-label="Previous commit">‹ Prev</button>
       <button class="btn small" id="next" aria-label="Next commit">Next ›</button>
     </div>
   </div>
   <div class="stepper" id="stepper" role="tablist"></div>
-  <div class="help"><kbd>[</kbd> <kbd>]</kbd> commit · <kbd>j</kbd> <kbd>l</kbd> line · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen · <kbd>n</kbd> <kbd>p</kbd> next / previous comment · <kbd>k</kbd> comment on line · <kbd>i</kbd> ask Claude · <kbd>m</kbd> ask Claude to change · <kbd>Enter</kbd> expand / collapse · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves a comment</div>
+  <div class="help"><kbd>[</kbd> <kbd>]</kbd> commit · <kbd>j</kbd> <kbd>l</kbd> line · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen · <kbd>n</kbd> <kbd>p</kbd> next / previous comment · <kbd>k</kbd> comment on line · <kbd>u</kbd> submit review · <kbd>i</kbd> ask Claude · <kbd>m</kbd> ask Claude to change · <kbd>Enter</kbd> expand / collapse · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves a comment</div>
 </header>
 
 <main>
@@ -738,6 +741,34 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   }
 
   function renderAll() { renderStepper(); renderCommit(); renderFiles(); renderQueue(); measureHead(); renderFeedback(); }
+  // Submitting the review is the viewer's explicit, two-click action; Claude performs it on GitHub when notified.
+  let subOpen = false;
+  function toggleSubmit() { subOpen = !subOpen; if (subOpen && fbOpen) { fbOpen = false; renderFeedback(); } renderSubmit(); }
+  document.getElementById('submitrev').onclick = toggleSubmit;
+  function renderSubmit() {
+    const old = document.getElementById('sub-panel'); const keep = old ? { body: old.querySelector('#sub-body').value, ev: (old.querySelector('input[name=subev]:checked') || {}).value } : null;
+    if (old) old.remove(); if (!subOpen) return;
+    const all = Object.values(comments);
+    const inDraft = all.filter(x => x.status === 'queued' && !x.replyToConv).length, conv = all.filter(x => x.status === 'queued' && x.replyToConv).length, syncing = all.filter(x => x.syncPending).length;
+    const p = document.createElement('div'); p.id = 'sub-panel'; p.className = 'fbpanel';
+    p.innerHTML = '<div class="fbpanel-head"><b>Submit your review</b><button class="btn small" aria-label="Close">✕</button></div>' +
+      '<div class="hint">' + inDraft + ' comment' + (inDraft === 1 ? '' : 's') + ' in your pending GitHub review' + (syncing ? ' · ' + syncing + ' still syncing' : '') + '. Submitting makes them public.</div>' +
+      '<textarea id="sub-body" placeholder="Review summary (optional)"></textarea>' +
+      '<div class="subev">' + [['COMMENT', 'Comment'], ['APPROVE', 'Approve'], ['REQUEST_CHANGES', 'Request changes']].map(([v, l], i) => '<label><input type="radio" name="subev" value="' + v + '"' + (i === 0 ? ' checked' : '') + '> ' + l + '</label>').join('') + '</div>' +
+      (conv ? '<label class="subconv"><input type="checkbox" id="sub-conv" checked> Also post ' + conv + ' queued conversation repl' + (conv === 1 ? 'y' : 'ies') + '</label>' : '') +
+      '<div class="actions"><button class="btn primary small" id="sub-go">Submit review</button><button class="btn small" id="sub-cancel">Cancel</button></div>';
+    if (keep) { p.querySelector('#sub-body').value = keep.body; const r = p.querySelector('input[value="' + keep.ev + '"]'); if (r) r.checked = true; }
+    p.querySelector('.fbpanel-head button').onclick = p.querySelector('#sub-cancel').onclick = () => { subOpen = false; renderSubmit(); };
+    const go = p.querySelector('#sub-go');
+    go.onclick = async () => {
+      const ev = p.querySelector('input[name=subev]:checked').value, label = { COMMENT: 'comment', APPROVE: 'approve', REQUEST_CHANGES: 'request changes' }[ev];
+      if (!go.dataset.armed) { go.dataset.armed = '1'; go.textContent = 'Click again: submit as "' + label + '" (public)'; return; }
+      const body = p.querySelector('#sub-body').value.trim(), withConv = !!(p.querySelector('#sub-conv') || {}).checked;
+      const sent = await notifyClaude({ id: 'submit-' + Date.now().toString(36) }, 'event=' + ev + ' postConversationReplies=' + (withConv ? 'yes' : 'no') + '\n' + body, document.getElementById('submitrev'), 'submit review');
+      subOpen = false; renderSubmit(); toast(sent ? 'Sent to Claude: submitting your review' : 'Claude was not notified; tell Claude in chat to submit');
+    };
+    document.body.appendChild(p); setTimeout(() => p.querySelector('#sub-body').focus(), 0);
+  }
   // Feedback conversations with Claude live in a panel by the Feedback button, never in the diff.
   let fbOpen = false;
   function renderFeedback() {
@@ -774,7 +805,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     m.innerHTML = '<button class="btn small" data-fb="issue">Open a new GitHub issue</button><button class="btn small ask" data-fb="claude">Tell Claude, it writes the issue</button>';
     const r = e.currentTarget.getBoundingClientRect(); m.style.top = (r.bottom + 6) + 'px'; m.style.right = Math.max(16, window.innerWidth - r.right) + 'px';
     m.querySelector('[data-fb="issue"]').onclick = () => { m.remove(); openIssue(); };
-    m.querySelector('[data-fb="claude"]').onclick = () => { m.remove(); fbOpen = true; renderFeedback(); };
+    m.querySelector('[data-fb="claude"]').onclick = () => { m.remove(); fbOpen = true; if (subOpen) { subOpen = false; renderSubmit(); } renderFeedback(); };
     document.body.appendChild(m);
     setTimeout(() => document.addEventListener('click', function off(ev) { if (!m.contains(ev.target)) { m.remove(); document.removeEventListener('click', off); } }), 0);
   };
@@ -860,7 +891,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
       ']': () => go(current + 1), '[': () => go(current - 1), ArrowRight: () => stepComment(1), ArrowLeft: () => stepComment(-1),
       j: () => moveCursor(-1), ArrowUp: () => moveCursor(-1), l: () => moveCursor(1), ArrowDown: () => moveCursor(1),
       PageUp: () => pageCursor(-1), PageDown: () => pageCursor(1),
-      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), m: () => lineAction('.modbtn'), Enter: () => enterCursor()
+      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), m: () => lineAction('.modbtn'), Enter: () => enterCursor()
     }[e.key];
     if (act) { e.preventDefault(); act(); }
   });
