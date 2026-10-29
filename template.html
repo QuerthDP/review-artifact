@@ -99,7 +99,6 @@ header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 #sub-body { min-height: 70px; }
 .fbpanel-head { display: flex; align-items: center; justify-content: space-between; }
 .chat .card-head .dismiss { margin-left: auto; }
-.fbmenu { position: fixed; z-index: 50; display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 30px rgba(0,0,0,.18); }
 .discussion .pending { font-size: 12px; color: var(--muted); font-style: italic; }
 .discussion { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; border-top: 1px dashed var(--line, #ccc); padding-top: 8px; }
 .note { margin-top: 8px; background: var(--posted-soft); border-radius: 6px; padding: 6px 10px; font-size: 12px; }
@@ -220,7 +219,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     </div>
   </div>
   <div class="stepper" id="stepper" role="tablist"></div>
-  <div class="help"><kbd>[</kbd> <kbd>]</kbd> commit · <kbd>j</kbd> <kbd>l</kbd> line · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen · <kbd>n</kbd> <kbd>p</kbd> next / previous comment · <kbd>k</kbd> comment on line · <kbd>u</kbd> submit review · <kbd>h</kbd> show / hide queue · <kbd>i</kbd> ask Claude · <kbd>m</kbd> ask Claude to change · <kbd>Enter</kbd> expand / collapse · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves a comment</div>
+  <div class="help"><kbd>[</kbd> <kbd>]</kbd> commit · <kbd>j</kbd> <kbd>l</kbd> line · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen · <kbd>n</kbd> <kbd>p</kbd> next / previous comment · <kbd>k</kbd> comment on line · <kbd>u</kbd> submit review · <kbd>f</kbd> feedback · <kbd>h</kbd> show / hide queue · <kbd>i</kbd> ask Claude · <kbd>m</kbd> ask Claude to change · <kbd>Enter</kbd> expand / collapse · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves a comment</div>
 </header>
 
 <main>
@@ -793,25 +792,14 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   function renderMode() { document.getElementById('mode').textContent = viewMode === 'split' ? 'Unified' : 'Split'; }
   document.getElementById('mode').onclick = () => { viewMode = viewMode === 'split' ? 'unified' : 'split'; lsSet('viewmode', viewMode); renderMode(); renderFiles(); };
   renderMode();
-  // Feedback on the tool itself: a new GitHub issue on the tool's repo, prefilled with where the viewer was.
+  // Feedback on the tool goes to Claude, which writes it up as an issue on the tool's repo.
   const FEEDBACK_REPO = 'QuerthDP/review-artifact';
-  function openIssue() {
-    const c = COMMITS[current];
-    const body = '## What happened\n\n\n## What I expected\n\n\n---\nPage: ' + document.title + ' · ' + REPO.replace('https://github.com/', '') + ' · commit ' + c.short + ' · ' + viewMode + ' view · ' + new Date().toISOString().slice(0, 10) + '\n';
-    const url = 'https://github.com/' + FEEDBACK_REPO + '/issues/new?title=' + encodeURIComponent('Feedback: ') + '&body=' + encodeURIComponent(body);
-    const a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
+  function toggleFeedback() {
+    fbOpen = !fbOpen; if (fbOpen && subOpen) { subOpen = false; renderSubmit(); }
+    renderFeedback();
+    if (fbOpen) setTimeout(() => { const ta = document.querySelector('#fb-panel #ask-ta'); if (ta) ta.focus(); }, 0);
   }
-  // The Feedback button offers two routes: write the issue yourself, or tell Claude and let it file one.
-  document.getElementById('feedback').onclick = e => {
-    const old = document.getElementById('fb-menu'); if (old) { old.remove(); return; }
-    const m = document.createElement('div'); m.id = 'fb-menu'; m.className = 'fbmenu';
-    m.innerHTML = '<button class="btn small" data-fb="issue">Open a new GitHub issue</button><button class="btn small ask" data-fb="claude">Tell Claude, it writes the issue</button>';
-    const r = e.currentTarget.getBoundingClientRect(); m.style.top = (r.bottom + 6) + 'px'; m.style.right = Math.max(16, window.innerWidth - r.right) + 'px';
-    m.querySelector('[data-fb="issue"]').onclick = () => { m.remove(); openIssue(); };
-    m.querySelector('[data-fb="claude"]').onclick = () => { m.remove(); fbOpen = true; if (subOpen) { subOpen = false; renderSubmit(); } renderFeedback(); };
-    document.body.appendChild(m);
-    setTimeout(() => document.addEventListener('click', function off(ev) { if (!m.contains(ev.target)) { m.remove(); document.removeEventListener('click', off); } }), 0);
-  };
+  document.getElementById('feedback').onclick = toggleFeedback;
   function renderQueueToggle() { const hidden = lsGet('queuehidden') === '1'; document.body.classList.toggle('queue-hidden', hidden); document.getElementById('queuetoggle').textContent = hidden ? 'Show queue' : 'Hide queue'; }
   document.getElementById('queuetoggle').onclick = () => { lsSet('queuehidden', lsGet('queuehidden') === '1' ? '0' : '1'); renderQueueToggle(); measureHead(); };
   renderQueueToggle();
@@ -894,7 +882,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
       ']': () => go(current + 1), '[': () => go(current - 1), ArrowRight: () => stepComment(1), ArrowLeft: () => stepComment(-1),
       j: () => moveCursor(-1), ArrowUp: () => moveCursor(-1), l: () => moveCursor(1), ArrowDown: () => moveCursor(1),
       PageUp: () => pageCursor(-1), PageDown: () => pageCursor(1),
-      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), Enter: () => enterCursor()
+      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), f: () => toggleFeedback(), F: () => toggleFeedback(), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), Enter: () => enterCursor()
     }[e.key];
     if (act) { e.preventDefault(); act(); }
   });
