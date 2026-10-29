@@ -99,6 +99,7 @@ header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 #sub-body { min-height: 70px; }
 .fbpanel-head { display: flex; align-items: center; justify-content: space-between; }
 .chat .card-head .dismiss { margin-left: auto; }
+.fbpanel .fbcur { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 .discussion .dismiss { align-self: flex-end; }
 .discussion .pending { font-size: 12px; color: var(--muted); font-style: italic; }
 .discussion { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; border-top: 1px dashed var(--line, #ccc); padding-top: 8px; }
@@ -331,7 +332,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     if (mod) d.style.borderColor = 'var(--proposed)';
     d.querySelector('#ask-send').onclick = () => { const v = d.querySelector('#ask-ta').value.trim(); if (v) sendQuestion(anchor, v, el); };
     d.querySelector('#ask-cancel').onclick = () => { dropDraft(fb ? 'fb' : 'a|' + draftKey(anchor)); openAsk = null; renderAll(); };
-    setTimeout(() => { const t = d.querySelector('#ask-ta'); if (t) t.focus(); }, 0);
+    if (!fb) setTimeout(() => { const t = d.querySelector('#ask-ta'); if (t) t.focus(); }, 0);
     return d;
   }
   function threadCard(t, el) {
@@ -752,7 +753,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   }
 
   function renderAll() { renderStepper(); renderCommit(); renderFiles(); renderQueue(); measureHead(); renderFeedback(); restoreDrafts(); saveUi(); }
-  function closeAll() { openComposer = null; openAsk = null; editing = null; fbOpen = false; subOpen = false; renderSubmit(); renderAll(); }
+  function closeAll() { openComposer = null; openAsk = null; editing = null; fbOpen = false; showFbDone = false; fbCur = 0; subOpen = false; renderSubmit(); renderAll(); }
   // Submitting the review is the viewer's explicit, two-click action; Claude performs it on GitHub when notified.
   let subOpen = false;
   function toggleSubmit() { subOpen = !subOpen; if (subOpen && fbOpen) { fbOpen = false; renderFeedback(); } renderSubmit(); }
@@ -788,15 +789,30 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     if (old) old.remove(); if (!fbOpen) return;
     const p = document.createElement('div'); p.id = 'fb-panel'; p.className = 'fbpanel';
     p.innerHTML = '<div class="fbpanel-head"><b>Feedback on the review tool</b><button class="btn small" aria-label="Close feedback">✕</button></div>';
-    p.querySelector('.fbpanel-head button').onclick = () => { fbOpen = false; renderFeedback(); };
+    p.querySelector('.fbpanel-head button').onclick = closeFeedback;
     // Answered feedback (fixed, or an issue filed) is dismissed on its own; a link brings it back.
     const fbAll = Object.values(threads).filter(t => t.kind === 'feedback'), fbDone = fbAll.filter(t => t.status === 'answered').length;
-    if (fbDone) { const l = document.createElement('button'); l.className = 'btn small'; l.textContent = showFbDone ? 'Hide resolved feedback' : 'Show ' + fbDone + ' resolved'; l.onclick = () => { showFbDone = !showFbDone; renderFeedback(); }; p.appendChild(l); }
-    fbAll.filter(t => (showFbDone || t.status !== 'answered') && visibleThread(t)).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')).forEach(t => p.appendChild(threadCard(t, document.getElementById('feedback'))));
+    if (fbDone) { const l = document.createElement('button'); l.className = 'btn small'; l.textContent = showFbDone ? 'Hide resolved feedback' : 'Show ' + fbDone + ' resolved'; l.onclick = () => { showFbDone = !showFbDone; renderFeedback(); }; l.classList.add('fbstop'); p.appendChild(l); }
+    fbAll.filter(t => (showFbDone || t.status !== 'answered') && visibleThread(t)).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')).forEach(t => { const card = threadCard(t, document.getElementById('feedback')); card.classList.add('fbstop'); p.appendChild(card); });
     const comp = askComposer({ commit: COMMITS[current].sha, commitIdx: current, kind: 'feedback' }, document.getElementById('feedback'));
-    comp.querySelector('#ask-cancel').onclick = () => { fbOpen = false; renderFeedback(); };
+    comp.querySelector('#ask-cancel').onclick = closeFeedback; comp.classList.add('fbstop');
     if (draft) comp.querySelector('#ask-ta').value = draft;
-    p.appendChild(comp); document.body.appendChild(p); restoreDrafts(); saveUi();
+    p.appendChild(comp); document.body.appendChild(p); restoreDrafts(); saveUi(); markFb(false);
+  }
+  // Closing the panel always folds the resolved feedback away again.
+  function closeFeedback() { fbOpen = false; showFbDone = false; fbCur = 0; renderFeedback(); }
+  // j / l move between the panel's items (resolved toggle, conversations, the new-feedback box); Enter acts on one.
+  let fbCur = 0;
+  function markFb(scroll) {
+    const st = Array.from(document.querySelectorAll('#fb-panel .fbstop')); fbCur = Math.max(0, Math.min(st.length - 1, fbCur));
+    st.forEach((el, i) => el.classList.toggle('fbcur', i === fbCur)); if (scroll && st[fbCur]) st[fbCur].scrollIntoView({ block: 'nearest' });
+  }
+  function fbKey(k) {
+    const st = Array.from(document.querySelectorAll('#fb-panel .fbstop')); if (!st.length) return false;
+    if (k === 'j' || k === 'ArrowUp') { fbCur--; markFb(true); return true; }
+    if (k === 'l' || k === 'ArrowDown') { fbCur++; markFb(true); return true; }
+    if (k === 'Enter') { const el = st[fbCur]; if (!el) return false; if (el.tagName === 'BUTTON') el.click(); else { const ta = el.querySelector('textarea'); if (ta) ta.focus(); } return true; }
+    return false;
   }
   function measureHead() { document.documentElement.style.setProperty('--head-h', document.getElementById('top').offsetHeight + 'px'); }
   function go(i) { if (i < 0 || i >= COMMITS.length) return; current = i; cursorId = null; openComposer = null; editing = null; location.hash = 'commit-' + (i + 1); renderAll(); window.scrollTo({ top: 0 }); }
@@ -807,10 +823,12 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   renderMode();
   // Feedback on the tool goes to Claude, which writes it up as an issue on the tool's repo.
   const FEEDBACK_REPO = 'QuerthDP/review-artifact';
-  function toggleFeedback() {
-    fbOpen = !fbOpen; if (fbOpen && subOpen) { subOpen = false; renderSubmit(); }
+  function toggleFeedback(e) {
+    if (fbOpen) { closeFeedback(); return; }
+    fbOpen = true; if (subOpen) { subOpen = false; renderSubmit(); }
     renderFeedback();
-    if (fbOpen) setTimeout(() => { const ta = document.querySelector('#fb-panel #ask-ta'); if (ta) ta.focus(); }, 0);
+    // A click goes straight to typing; the f key leaves j / l free to move between items.
+    if (e && e.type === 'click') setTimeout(() => { const ta = document.querySelector('#fb-panel #ask-ta'); if (ta) ta.focus(); }, 0);
   }
   document.getElementById('feedback').onclick = toggleFeedback;
   function renderQueueToggle() { const hidden = lsGet('queuehidden') === '1'; document.body.classList.toggle('queue-hidden', hidden); document.getElementById('queuetoggle').textContent = hidden ? 'Show queue' : 'Hide queue'; }
@@ -900,6 +918,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     }
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     if (e.key === 'Escape') { closeAll(); return; }
+    if (fbOpen && fbKey(e.key)) { e.preventDefault(); return; }
     if (e.key === 'Enter' && e.target.closest && e.target.closest('button, a, label')) return;
     const keys = {
       ']': () => go(current + 1), '[': () => go(current - 1), ArrowRight: () => stepComment(1), ArrowLeft: () => stepComment(-1),
