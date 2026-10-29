@@ -94,7 +94,6 @@ header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 .ghc { border-top: 1px solid var(--line-soft); padding: 6px 0; font-size: 13px; }
 .ghwho { font-size: 12px; color: var(--muted); } .ghwho b { color: var(--fg); }
 .ghbody { overflow-wrap: anywhere; } .ghbody img { max-width: 100%; height: auto; vertical-align: middle; } .ghbody pre { overflow-x: auto; } .ghbody details { margin: 4px 0; }
-.fbbox { position: fixed; right: 16px; top: 70px; width: min(440px, calc(100vw - 32px)); z-index: 50; background: var(--panel); box-shadow: 0 8px 30px rgba(0,0,0,.18); }
 .discussion .pending { font-size: 12px; color: var(--muted); font-style: italic; }
 .discussion { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; border-top: 1px dashed var(--line, #ccc); padding-top: 8px; }
 .note { margin-top: 8px; background: var(--posted-soft); border-radius: 6px; padding: 6px 10px; font-size: 12px; }
@@ -707,24 +706,13 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   function renderMode() { document.getElementById('mode').textContent = viewMode === 'split' ? 'Unified' : 'Split'; }
   document.getElementById('mode').onclick = () => { viewMode = viewMode === 'split' ? 'unified' : 'split'; lsSet('viewmode', viewMode); renderMode(); renderFiles(); };
   renderMode();
-  // Feedback on the tool itself: GitHub's "new file" editor, prefilled; its "Propose changes" opens a PR (forking first for non-writers).
+  // Feedback on the tool itself: a new GitHub issue on the tool's repo, prefilled with where the viewer was.
   const FEEDBACK_REPO = 'QuerthDP/review-artifact';
   document.getElementById('feedback').onclick = () => {
-    if (document.getElementById('fb-box')) return;
-    const box = document.createElement('div'); box.id = 'fb-box'; box.className = 'fbbox composer';
-    box.innerHTML = '<div class="hint">Feedback on the review tool · opens a pull request on <a href="https://github.com/' + FEEDBACK_REPO + '" target="_blank" rel="noopener">' + FEEDBACK_REPO + '</a> with your text as a file under <code>feedback/</code></div><textarea id="fb-ta" placeholder="What should work differently? Bugs, missing features, annoyances…"></textarea><div class="actions"><button class="btn primary small" id="fb-send">Open PR on GitHub</button><button class="btn small" id="fb-cancel">Cancel</button></div>';
-    document.body.appendChild(box);
-    const ta = box.querySelector('#fb-ta'); ta.focus();
-    box.querySelector('#fb-cancel').onclick = () => box.remove();
-    box.querySelector('#fb-send').onclick = () => {
-      const text = ta.value.trim(); if (!text) return;
-      const now = new Date().toISOString(), c = COMMITS[current];
-      const slug = text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'feedback';
-      const body = '# ' + text.split('\n')[0].slice(0, 80) + '\n\n' + text + '\n\n---\nFrom: ' + document.title + ' · commit ' + c.short + ' · ' + now.slice(0, 10) + '\n';
-      const url = 'https://github.com/' + FEEDBACK_REPO + '/new/main?filename=' + encodeURIComponent('feedback/' + now.slice(0, 10) + '-' + slug + '.md') + '&value=' + encodeURIComponent(body) + '&message=' + encodeURIComponent('feedback: ' + text.split('\n')[0].slice(0, 60));
-      const a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
-      box.remove(); toast('Opened GitHub: click "Propose changes" there to open the PR');
-    };
+    const c = COMMITS[current];
+    const body = '## What happened\n\n\n## What I expected\n\n\n---\nPage: ' + document.title + ' · ' + REPO.replace('https://github.com/', '') + ' · commit ' + c.short + ' · ' + viewMode + ' view · ' + new Date().toISOString().slice(0, 10) + '\n';
+    const url = 'https://github.com/' + FEEDBACK_REPO + '/issues/new?title=' + encodeURIComponent('Feedback: ') + '&body=' + encodeURIComponent(body);
+    const a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
   };
   function renderQueueToggle() { const hidden = lsGet('queuehidden') === '1'; document.body.classList.toggle('queue-hidden', hidden); document.getElementById('queuetoggle').textContent = hidden ? 'Show queue' : 'Hide queue'; }
   document.getElementById('queuetoggle').onclick = () => { lsSet('queuehidden', lsGet('queuehidden') === '1' ? '0' : '1'); renderQueueToggle(); measureHead(); };
