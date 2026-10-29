@@ -199,6 +199,7 @@ aside.queue { position: sticky; top: calc(env(safe-area-inset-top, 0px) + var(--
 aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
 .qgroup { margin-top: 10px; }
 .qgroup h3 { margin: 0 0 6px; font-size: 12px; display: flex; gap: 6px; align-items: center; }
+body.nopointer, body.nopointer * { cursor: none !important; }
 .qitem { display: block; width: 100%; text-align: left; border: 1px solid var(--line-soft); background: var(--bg); border-radius: 6px; padding: 6px 8px; margin-bottom: 4px; cursor: pointer; color: var(--fg); min-width: 0; }
 .qitem:hover { border-color: var(--accent); }
 .qitem .where { font-family: var(--mono); font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
@@ -766,7 +767,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   function toDiff() { if (region === 'commits') { region = 'diff'; markStep(); return; } if (region !== 'queue') return; region = 'diff'; markQ(false); }
   function moveQ(d) { qCur += d; markQ(true); }
   function renderAll() { renderStepper(); renderCommit(); renderFiles(); renderQueue(); measureHead(); renderFeedback(); restoreDrafts(); saveUi(); markQ(false); markStep(); }
-  function closeAll() { openComposer = null; openAsk = null; editing = null; fbOpen = false; showFbDone = false; fbCur = 0; subOpen = false; renderSubmit(); renderAll(); }
+  function closeAll() { openComposer = null; openAsk = null; editing = null; fbOpen = false; showFbDone = false; fbCur = Infinity; subOpen = false; renderSubmit(); renderAll(); }
   // Submitting the review is the viewer's explicit, two-click action; Claude performs it on GitHub when notified.
   let subOpen = false;
   function toggleSubmit() { subOpen = !subOpen; if (subOpen && fbOpen) { fbOpen = false; renderFeedback(); } renderSubmit(); }
@@ -813,9 +814,10 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     p.appendChild(comp); document.body.appendChild(p); restoreDrafts(); saveUi(); markFb(false);
   }
   // Closing the panel always folds the resolved feedback away again.
-  function closeFeedback() { fbOpen = false; showFbDone = false; fbCur = 0; renderFeedback(); }
+  function closeFeedback() { fbOpen = false; showFbDone = false; fbCur = Infinity; renderFeedback(); }
   // j / l move between the panel's items (resolved toggle, conversations, the new-feedback box); Enter acts on one.
-  let fbCur = 0;
+  // The panel opens on the new-feedback box, its last item.
+  let fbCur = Infinity;
   function markFb(scroll) {
     const st = Array.from(document.querySelectorAll('#fb-panel .fbstop')); fbCur = Math.max(0, Math.min(st.length - 1, fbCur));
     st.forEach((el, i) => el.classList.toggle('fbcur', i === fbCur)); if (scroll && st[fbCur]) st[fbCur].scrollIntoView({ block: 'nearest' });
@@ -859,7 +861,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   const stops = () => Array.from(document.querySelectorAll('#commit .gstop, #files .file-head, #files tr.line, #files tr.hunk')).filter(el => !el.closest('[hidden]') && (el.classList.contains('file-head') || !el.closest('.collapsed')));
   function applyCursor() { document.querySelectorAll('.kcur').forEach(x => x.classList.remove('kcur')); const el = cursorId && document.getElementById(cursorId); if (el) el.classList.add('kcur'); }
   function setCursor(el, scroll) {
-    if (!el || !el.id) return; cursorId = el.id; applyCursor(); if (scroll === false) return;
+    if (!el || !el.id) return; cursorId = el.id; applyCursor(); savePos(); if (scroll === false) return;
     const r = el.getBoundingClientRect(), topPad = 150, botPad = 60;
     if (r.top < topPad) window.scrollBy(0, r.top - topPad); else if (r.bottom > window.innerHeight - botPad) window.scrollBy(0, r.bottom - window.innerHeight + botPad);
   }
@@ -938,7 +940,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     const ln = rows[idx].previousElementSibling; if (ln && ln.matches && ln.matches('tr.line')) setCursor(ln, false);
     rows[idx].scrollIntoView({ block: 'center' }); flashRow(rows[idx].previousElementSibling || rows[idx]);
   }
-  // d, q and r act on the cards of the selected line or comment: dismiss a conversation, queue, toggle Reviewed by Human.
+  // d, q and r act on the cards of the selected line or comment: dismiss or restore a conversation, queue, toggle Reviewed by Human.
   function cardAction(sel, none) {
     const cur = current_(); let scope = [];
     if (lastCmt) scope = [lastCmt];
@@ -964,16 +966,37 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
       ']': () => go(current + 1), '[': () => go(current - 1), ArrowRight: () => toQueue(), ArrowLeft: () => toDiff(),
       j: () => moveCursor(-1), ArrowUp: () => region === 'queue' ? moveQ(-1) : arrowMove(-1), l: () => moveCursor(1), ArrowDown: () => region === 'queue' ? moveQ(1) : arrowMove(1),
       PageUp: () => pageCursor(-1), PageDown: () => pageCursor(1),
-      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), f: () => toggleFeedback(), d: () => cardAction('[data-act="dismiss"], [data-act="hidedisc"]', 'Nothing to dismiss here'), q: () => cardAction('[data-act="approve"]', 'No proposed comment to queue here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), Enter: () => enterCursor()
+      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), f: () => toggleFeedback(), d: () => cardAction('[data-act="dismiss"], [data-act="hidedisc"], .chat [data-act="restore"], [data-act="showdisc"]', 'Nothing to dismiss here'), q: () => cardAction('[data-act="approve"]', 'No proposed comment to queue here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), Enter: () => enterCursor()
     };
     const act = keys[e.key] || (e.key.length === 1 ? keys[e.key.toLowerCase()] : null);
     if (act) { e.preventDefault(); if (e.key.length === 1) toDiff(); act(); }
   });
 
+  // The mouse pointer hides after two idle seconds or on a key press, and comes back when the mouse moves.
+  let idleT;
+  function hidePointer() { document.body.classList.add('nopointer'); }
+  window.addEventListener('mousemove', () => { document.body.classList.remove('nopointer'); clearTimeout(idleT); idleT = setTimeout(hidePointer, 2000); }, { passive: true });
+  window.addEventListener('keydown', hidePointer);
+  // A reload keeps the place: the selected line goes back to where it sat on screen, or else the page to its old offset.
+  let restoring = true;
+  function savePos() { if (restoring) return; const el = current_(); lsSet('pos', JSON.stringify({ commit: current, id: el ? el.id : null, top: el ? el.getBoundingClientRect().top : 0, y: window.scrollY })); }
+  function restorePos() {
+    if (!restoring) return; let p = null; try { p = JSON.parse(lsGet('pos') || 'null'); } catch (e) {}
+    if (!p || p.commit !== current) return;
+    const el = p.id && document.getElementById(p.id);
+    if (el) { cursorId = p.id; applyCursor(); window.scrollBy(0, el.getBoundingClientRect().top - p.top); } else window.scrollTo(0, p.y);
+  }
+  // Comments load after the first paint and push lines down, so the place is restored again until the viewer moves.
+  const settle = () => { restoring = false; };
+  ['wheel', 'touchmove', 'keydown', 'mousedown'].forEach(ev => window.addEventListener(ev, settle, { passive: true, once: true }));
+  setTimeout(settle, 4000);
+  let posT; window.addEventListener('scroll', () => { clearTimeout(posT); posT = setTimeout(savePos, 150); }, { passive: true });
+  window.addEventListener('pagehide', savePos);
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
   try { const ui = JSON.parse(lsGet('ui') || 'null'); if (ui) ({ openComposer, openAsk, editing, fbOpen, subOpen } = ui); } catch (e) {}
   if (subOpen) renderSubmit();
   const m0 = /^#commit-(\d+)$/.exec(location.hash); if (m0) { const i = parseInt(m0[1], 10) - 1; if (i >= 0 && i < COMMITS.length) current = i; }
-  renderAll();
+  renderAll(); restorePos();
 
   window.claude && window.claude.use && window.claude.use('comments').then(ns => { cm = ns; });
   window.claude && window.claude.use && window.claude.use('db').then(ns => {
@@ -981,11 +1004,11 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     if (!db) { document.getElementById('dbbanner').hidden = false; dbReady = true; renderQueue(); return; }
     db.collection('comments').onSnapshot(snap => {
       const next = {}; snap.docs.forEach(d => { if (d.exists) next[d.id] = Object.assign({ id: d.id }, d.data()); });
-      comments = next; dbReady = true; renderAll();
+      comments = next; dbReady = true; renderAll(); restorePos();
     }, err => { document.getElementById('dbbanner').hidden = false; dbReady = true; renderQueue(); });
     db.collection('threads').onSnapshot(snap => {
       const next = {}; snap.docs.forEach(d => { if (d.exists) next[d.id] = Object.assign({ id: d.id }, d.data()); });
-      threads = next; renderAll();
+      threads = next; renderAll(); restorePos();
     }, err => {});
   });
 })();
