@@ -279,6 +279,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   const GH_SERVER = 'Github CoPilot'; let mcp = null;
   const COLLAPSED_DEFAULT = new Set(__COLLAPSED_JSON__);
   let db = null, dbReady = false;
+  const cmReady = window.claude && window.claude.use ? window.claude.use('comments') : Promise.resolve(null);
   let cm = null;               // comments capability: used only to notify Claude's session; the conversation itself lives in the db
   let threads = {};            // id -> question thread (db collection "threads")
   let openAsk = null;          // {commit, commitIdx, path, line, side} for the in-page "Ask Claude" composer
@@ -293,15 +294,21 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     catch (e) { toast('Could not save: ' + (e && e.code || 'error')); return false; }
   }
   // Notify Claude's session through a shell comment; the id in the text lets Claude find the db thread.
+  // A send that may have gone through (no receipt in time) is not reported as failed; notifyErr holds only definite failures.
+  const DEFINITE = ['consent_required', 'claude_unavailable', 'not_granted', 'capability_disabled', 'capability_removed', 'forbidden', 'invalid', 'rate_limited'];
+  let notifyErr = null;
   async function notifyClaude(t, text, el, kind) {
-    if (!cm) return null;
+    notifyErr = null;
+    if (!cm) cm = await cmReady;
+    if (!cm) { notifyErr = 'not_granted'; return null; }
     try {
       if (t.shellThreadId) { await cm.sendToClaude({ threadId: t.shellThreadId, text }); return t.shellThreadId; }
       const anchor = await cm.anchorFor(el);
       const r = await cm.sendToClaude({ anchor, text: '[' + (kind || 'page question') + ' ' + t.id + '] ' + text });
       return r.threadId;
     } catch (e) {
-      const code = e && e.code;
+      const code = e && e.code; notifyErr = DEFINITE.includes(code) ? code : null;
+      if (!notifyErr) { toast('Sent to Claude (no receipt yet)'); return null; }
       if (code === 'consent_required') toast('Saved. Allow commenting when asked so Claude gets notified');
       else if (code === 'claude_unavailable' || code === 'not_granted') toast('Saved. Tell Claude in chat to answer page questions');
       else toast('Saved, but Claude was not notified (' + (code || 'error') + ')');
@@ -313,10 +320,10 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     const id = 'q_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
     const t = { id, kind: anchor.kind || 'question', commit: anchor.commit, path: anchor.path || null, line: anchor.line || null, side: anchor.side || null, status: 'asked', messages: [{ role: 'user', text, at: new Date().toISOString() }], createdAt: new Date().toISOString() };
     const shellThreadId = await notifyClaude(t, text, el, t.kind === 'modify' ? 'modify request' : t.kind === 'feedback' ? 'feedback request' : 'page question');
-    const ok = await writeThread(id, Object.assign({}, t, { shellThreadId }), true);
+    const ok = await writeThread(id, Object.assign({}, t, { shellThreadId, notifyError: shellThreadId ? null : notifyErr }), true);
     sending = false;
     if (ok) {
-      dropDraft(t.kind === 'feedback' ? 'fb' : 'a|' + draftKey(anchor)); openAsk = null; toast(shellThreadId ? 'Sent to Claude' : 'Question saved');
+      dropDraft(t.kind === 'feedback' ? 'fb' : 'a|' + draftKey(anchor)); openAsk = null; toast(shellThreadId || !notifyErr ? 'Sent to Claude' : 'Question saved');
       // The feedback panel keeps unsent drafts across re-renders; a sent message must not come back.
       if (t.kind === 'feedback') { const ta = document.querySelector('#fb-panel #ask-ta'); if (ta) ta.value = ''; renderFeedback(); }
     }
@@ -325,9 +332,9 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     if (sending) return; sending = true;
     const shellThreadId = await notifyClaude(t, text, el);
     const messages = (t.messages || []).concat([{ role: 'user', text, at: new Date().toISOString() }]);
-    const ok = await writeThread(t.id, { messages, status: 'asked', dismissed: false, shellThreadId: shellThreadId || t.shellThreadId || null, updatedAt: new Date().toISOString() }, false);
+    const ok = await writeThread(t.id, { messages, status: 'asked', dismissed: false, shellThreadId: shellThreadId || t.shellThreadId || null, notifyError: shellThreadId || t.shellThreadId ? null : notifyErr, updatedAt: new Date().toISOString() }, false);
     sending = false;
-    if (ok) { dropDraft('fu-' + t.id); toast(shellThreadId ? 'Sent to Claude' : 'Follow-up saved'); }
+    if (ok) { dropDraft('fu-' + t.id); toast(shellThreadId || !notifyErr ? 'Sent to Claude' : 'Follow-up saved'); }
   }
   function askComposer(anchor, el) {
     const d = document.createElement('div'); d.className = 'composer'; d.style.borderColor = 'var(--posted)';
@@ -344,7 +351,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   function threadCard(t, el) {
     const d = document.createElement('div'); d.className = 'chat'; d.id = 'chs-' + t.id;
     const msgs = (t.messages || []).map(m => '<div class="msg-row ' + m.role + '"><span class="who">' + (m.role === 'claude' ? 'Claude' : 'You') + '</span><div class="body">' + md(m.text) + '</div></div>').join('');
-    const pending = t.status === 'asked' ? '<div class="pending">Waiting for Claude' + (t.shellThreadId ? '' : ' (not notified: tell Claude in chat to answer page questions)') + '</div>' : '';
+    const pending = t.status === 'asked' ? '<div class="pending">Waiting for Claude' + (t.shellThreadId || !t.notifyError ? '' : ' (not notified: tell Claude in chat to answer page questions)') + '</div>' : '';
     d.innerHTML = '<div class="card-head"><b>' + (t.kind === 'modify' ? 'Change request to Claude' : t.kind === 'feedback' ? 'Feedback on the tool' : 'Conversation with Claude') + '</b>' + (t.path ? '' : '<span>commit-level</span>') + (t.dismissed ? '<span class="pill rejected">dismissed</span><button class="btn small dismiss" data-act="restore">Restore</button>' : t.status === 'answered' ? '<button class="btn small dismiss" data-act="dismiss" title="Hide this answered conversation; it can be restored from the queue">Dismiss</button>' : '') + '</div>' + msgs + pending + (t.commentId && comments[t.commentId] ? '<div class="made"><button class="btn small" data-act="gocomment">Go to the comment Claude drafted</button></div>' : '') + '<div class="followup"><textarea id="fu-' + t.id + '" placeholder="Follow up"></textarea><button class="btn small ask" data-act="followup">Send</button></div>';
     const gc = d.querySelector('[data-act="gocomment"]'); if (gc) gc.onclick = () => { const el = document.getElementById('cds-' + t.commentId); if (el) { setCursor(el, false); el.scrollIntoView({ block: 'center' }); flashRow(el); } };
     d.querySelector('[data-act="followup"]').onclick = () => { const ta = d.querySelector('#fu-' + t.id); const v = ta.value.trim(); if (v) sendFollowUp(t, v, el); };
@@ -456,8 +463,8 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     const shellThreadId = await notifyClaude(c, note, el, 'revision request');
     const at = new Date().toISOString();
     const discussion = (c.discussion || []).concat([{ role: 'user', text: note, at }]);
-    const ok = await write(id, { status: 'revise', discussionHidden: false, note, prevStatus: c.status, noteAt: at, discussion, shellThreadId: shellThreadId || c.shellThreadId || null }, false);
-    if (ok) { dropDraft('ta-' + id); editing = null; toast(shellThreadId ? 'Sent to Claude' : 'Saved; Claude not notified'); }
+    const ok = await write(id, { status: 'revise', discussionHidden: false, note, prevStatus: c.status, noteAt: at, discussion, shellThreadId: shellThreadId || c.shellThreadId || null, notifyError: shellThreadId || c.shellThreadId ? null : notifyErr }, false);
+    if (ok) { dropDraft('ta-' + id); editing = null; toast(shellThreadId || !notifyErr ? 'Sent to Claude' : 'Saved; Claude not notified'); }
   }
   async function createComment(anchor, body) {
     const id = newId();
@@ -505,7 +512,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
       const disc = c.discussion || [];
       const legacy = c.status === 'revise' && c.note && !disc.some(m => m.role === 'user' && m.text === c.note) ? [{ role: 'user', text: c.note }] : [];
       const msgs = disc.concat(legacy).map(m => '<div class="msg-row ' + m.role + '"><span class="who">' + (m.role === 'claude' ? 'Claude' : 'You') + '</span><div class="body">' + md(m.text) + '</div></div>').join('');
-      const wait = c.status === 'revise' ? '<div class="pending">Waiting for Claude' + (c.shellThreadId ? '' : ' (not notified: tell Claude in chat to pick up revision requests)') + '</div>' : '';
+      const wait = c.status === 'revise' ? '<div class="pending">Waiting for Claude' + (c.shellThreadId || !c.notifyError ? '' : ' (not notified: tell Claude in chat to pick up revision requests)') + '</div>' : '';
       // The conversation with Claude under a comment can be dismissed once it is settled; a new request shows it again.
       const hideBtn = msgs && !wait ? '<button class="btn small dismiss" data-act="hidedisc" title="Hide this conversation with Claude">Dismiss conversation</button>' : '';
       const note = c.discussionHidden && msgs && !wait ? '<div class="discussion"><button class="btn small" data-act="showdisc">Show conversation with Claude (' + (disc.length + legacy.length) + ')</button></div>' : msgs || wait ? '<div class="discussion">' + msgs + wait + hideBtn + '</div>' : '';
@@ -802,7 +809,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
         catch (e) { ghStatus(null); toast('GitHub call failed (' + (e && e.code || 'error') + '); asking Claude to submit'); }
       }
       const sent = await notifyClaude({ id: 'submit-' + Date.now().toString(36) }, 'event=' + ev + ' postConversationReplies=' + (withConv ? 'yes' : 'no') + '\n' + body, document.getElementById('submitrev'), 'submit review');
-      if (sent) dropDraft('sub-body'); subOpen = false; renderSubmit(); toast(sent ? 'Sent to Claude: submitting your review' : 'Claude was not notified; tell Claude in chat to submit');
+      if (sent || !notifyErr) dropDraft('sub-body'); subOpen = false; renderSubmit(); toast(sent || !notifyErr ? 'Sent to Claude: submitting your review' : 'Claude was not notified; tell Claude in chat to submit');
     };
     document.body.appendChild(p); restoreDrafts(); saveUi(); setTimeout(() => p.querySelector('#sub-body').focus(), 0);
   }
@@ -1030,7 +1037,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   const m0 = /^#commit-(\d+)$/.exec(location.hash); if (m0) { const i = parseInt(m0[1], 10) - 1; if (i >= 0 && i < COMMITS.length) current = i; }
   renderAll(); restorePos();
 
-  window.claude && window.claude.use && window.claude.use('comments').then(ns => { cm = ns; });
+  cmReady.then(ns => { cm = ns; });
   window.claude && window.claude.use && window.claude.use('mcp').then(ns => { mcp = ns; });
   window.claude && window.claude.use && window.claude.use('db').then(ns => {
     db = ns;
