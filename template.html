@@ -99,6 +99,7 @@ header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 #sub-body { min-height: 70px; }
 .fbpanel-head { display: flex; align-items: center; justify-content: space-between; }
 .chat .card-head .dismiss { margin-left: auto; }
+#queue .qcur { outline: 2px solid var(--accent); outline-offset: 1px; }
 .fbpanel .fbcur { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 .discussion .dismiss { align-self: flex-end; }
 .discussion .pending { font-size: 12px; color: var(--muted); font-style: italic; }
@@ -752,7 +753,18 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     });
   }
 
-  function renderAll() { renderStepper(); renderCommit(); renderFiles(); renderQueue(); measureHead(); renderFeedback(); restoreDrafts(); saveUi(); }
+  // Arrows move between the page's regions: Right enters the review queue, Left returns to the diff; Up and Down move within the region.
+  let region = 'diff', qCur = 0;
+  const qStops = () => Array.from(document.querySelectorAll('#queue button')).filter(b => b.offsetParent);
+  function markQ(scroll) {
+    const st = qStops(); qCur = Math.max(0, Math.min(st.length - 1, qCur));
+    st.forEach((b, i) => b.classList.toggle('qcur', region === 'queue' && i === qCur));
+    if (scroll && region === 'queue' && st[qCur]) st[qCur].scrollIntoView({ block: 'nearest' });
+  }
+  function toQueue() { if (region === 'queue' || !qStops().length) return; region = 'queue'; markQ(true); }
+  function toDiff() { if (region !== 'queue') return; region = 'diff'; markQ(false); }
+  function moveQ(d) { qCur += d; markQ(true); }
+  function renderAll() { renderStepper(); renderCommit(); renderFiles(); renderQueue(); measureHead(); renderFeedback(); restoreDrafts(); saveUi(); markQ(false); }
   function closeAll() { openComposer = null; openAsk = null; editing = null; fbOpen = false; showFbDone = false; fbCur = 0; subOpen = false; renderSubmit(); renderAll(); }
   // Submitting the review is the viewer's explicit, two-click action; Claude performs it on GitHub when notified.
   let subOpen = false;
@@ -880,7 +892,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     }
     else lineAction('.addbtn');
   }
-  document.addEventListener('click', e => { const el = e.target.closest && e.target.closest('#files tr.line, #files .file-head, #files tr.hunk'); if (el && el.id) setCursor(el, false); });
+  document.addEventListener('click', e => { const el = e.target.closest && e.target.closest('#files tr.line, #files .file-head, #files tr.hunk'); if (el && el.id) { setCursor(el, false); toDiff(); } });
   let lastCmt = null;
   window.addEventListener('wheel', () => { lastCmt = null; }, { passive: true });
   window.addEventListener('touchmove', () => { lastCmt = null; }, { passive: true });
@@ -919,15 +931,16 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     if (e.key === 'Escape') { closeAll(); return; }
     if (fbOpen && fbKey(e.key)) { e.preventDefault(); return; }
+    if (region === 'queue' && e.key === 'Enter') { e.preventDefault(); const b = qStops()[qCur]; if (b) { if (b.classList.contains('qitem')) toDiff(); b.click(); } return; }
     if (e.key === 'Enter' && e.target.closest && e.target.closest('button, a, label')) return;
     const keys = {
-      ']': () => go(current + 1), '[': () => go(current - 1), ArrowRight: () => stepComment(1), ArrowLeft: () => stepComment(-1),
-      j: () => moveCursor(-1), ArrowUp: () => moveCursor(-1), l: () => moveCursor(1), ArrowDown: () => moveCursor(1),
+      ']': () => go(current + 1), '[': () => go(current - 1), ArrowRight: () => toQueue(), ArrowLeft: () => toDiff(),
+      j: () => moveCursor(-1), ArrowUp: () => region === 'queue' ? moveQ(-1) : moveCursor(-1), l: () => moveCursor(1), ArrowDown: () => region === 'queue' ? moveQ(1) : moveCursor(1),
       PageUp: () => pageCursor(-1), PageDown: () => pageCursor(1),
       n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), f: () => toggleFeedback(), d: () => cardAction('[data-act="dismiss"], [data-act="hidedisc"]', 'Nothing to dismiss here'), q: () => cardAction('[data-act="approve"]', 'No proposed comment to queue here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), Enter: () => enterCursor()
     };
     const act = keys[e.key] || (e.key.length === 1 ? keys[e.key.toLowerCase()] : null);
-    if (act) { e.preventDefault(); act(); }
+    if (act) { e.preventDefault(); if (e.key.length === 1) toDiff(); act(); }
   });
 
   try { const ui = JSON.parse(lsGet('ui') || 'null'); if (ui) ({ openComposer, openAsk, editing, fbOpen, subOpen } = ui); } catch (e) {}
