@@ -2,10 +2,12 @@
 config.json: {"repo_dir", "head": "<PR head sha>", "review_id": "<PRR_... node id of the user's PENDING review>", "diff": "<diff.json>"}
 comment.json: the doc as ArtifactData get/out_dir saved it. Queued -> add/update; not queued but in draft -> delete.
 Prints the ArtifactData "update" data to write back (always clears syncPending)."""
-import json, re, subprocess, sys
+import json, os, re, subprocess, sys
 CFG = json.load(open(sys.argv[1])); REPO = CFG["repo_dir"]; HEAD = CFG["head"]; REVIEW = CFG["review_id"]
-CLAUDE = '<a href="https://claude.com/claude-code"><img alt="Generated with Claude Code" src="https://img.shields.io/badge/Generated%20with-Claude%20Code-D97757?style=for-the-badge&logo=claude&logoColor=white"></a>'
-HUMAN = '<a href="https://querthdp.github.io/reviewed-by-human/"><img alt="Reviewed by Human" src="https://img.shields.io/badge/Reviewed%20by-Human-2EA44F?style=for-the-badge&logo=github&logoColor=white"></a>'
+# Badges are a per-user choice: ~/.config/review-artifact/badges.json {"claude": html, "human": html}; none without it.
+try: BADGES = json.load(open(os.path.expanduser('~/.config/review-artifact/badges.json')))
+except FileNotFoundError: BADGES = {}
+CLAUDE, HUMAN = BADGES.get('claude', ''), BADGES.get('human', '')
 # Commit-level comments become file-level comments on the commit's most-changed file (GitHub has no commit-level review comments).
 MAIN = {c["sha"][:7]: max(c["files"], key=lambda f: f["add"] + f["del"])["path"] for c in json.load(open(CFG["diff"])) if c["files"]}
 def git(*a): return subprocess.run(['git', '-C', REPO, *a], capture_output=True, text=True, check=True).stdout
@@ -26,7 +28,7 @@ def map_line(sha, path, line):
 def body_of(c):
     b = c['body']
     if not c.get('path') and not c.get('replyTo'): b = '> ' + git('log', '-1', '--format=%s', c['commit']).strip() + '\n\n' + b
-    if c['author'] == 'claude': b += '\n\n' + CLAUDE + (' ' + HUMAN if c.get('humanReviewed') else '')
+    if c['author'] == 'claude' and CLAUDE: b += '\n\n' + CLAUDE + (' ' + HUMAN if c.get('humanReviewed') and HUMAN else '')
     return b
 c = json.load(open(sys.argv[2])); upd = {'syncPending': {'__delete__': True}}
 want = c.get('status') == 'queued' and c.get('source') != 'github'

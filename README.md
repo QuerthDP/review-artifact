@@ -24,6 +24,8 @@ Then, in a Claude Code session inside a clone of the repository under review:
 
 Requirements: `gh` (authenticated), `git`, `python3`, and a claude.ai account with Artifacts. `node` is used for a syntax check.
 
+Optional badges: put `{"claude": "<html>", "human": "<html>"}` in `~/.config/review-artifact/badges.json` to sign what Claude posts (and comments you mark "Reviewed by Human"). Without it nothing is signed.
+
 ## Feedback
 
 Use the **Feedback** button (or `f`) on any review page: tell Claude what bothers you and it files the issue. Or [open one directly](https://github.com/QuerthDP/review-artifact/issues/new).
