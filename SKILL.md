@@ -39,6 +39,7 @@ Claude's comments start **proposed**. Nothing reaches GitHub until the user clic
 
 The page sends a shell comment via `sendToClaude` for every action that needs Claude; it arrives as an artifact comment notification. The text prefix says what to do:
 
+- The page shows only `threads/<id>`: replying in or resolving the shell comment thread (including the automatic reply) never answers the viewer. Every `[page question|modify request|feedback request <id>]` is done only once `threads/<id>` has the Claude message and `status: "answered"`; write it before resolving the shell thread.
 - `[page question <threadId>] ...` → answer in `threads/<id>`: append `{role:"claude", text, at}` to `messages`, set `status: "answered"`. Concise. If the question asks for a review comment ("make a comment about it"), also create a Claude comment doc at the thread's anchor (`author: "claude", status: "proposed"`), set the thread's `commentId` to it (the conversation then links to the comment), and say so in the answer.
 - `[revision request <commentId>] <note>` → rewrite `comments/<id>.body`, append `{role:"claude", text: "<one line: what changed / answer>", at}` to `discussion` (the page already appended the user's note), set `status` back to `prevStatus` (or `proposed`), set `revisedAt`, delete `note`/`noteAt`/`prevStatus`. If it was in the draft, run ghsync to update GitHub. If the note is a question ("do these really need…?"), answer it in `discussion` and revise accordingly.
 - `[modify request <threadId>] <what to change>` (thread `kind: "modify"`, anchored to a line):
