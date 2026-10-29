@@ -220,7 +220,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     </div>
   </div>
   <div class="stepper" id="stepper" role="tablist"></div>
-  <div class="help"><kbd>[</kbd> <kbd>]</kbd> commit · <kbd>j</kbd> <kbd>l</kbd> line · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen · <kbd>n</kbd> <kbd>p</kbd> next / previous comment · <kbd>k</kbd> comment on line · <kbd>u</kbd> submit review · <kbd>i</kbd> ask Claude · <kbd>m</kbd> ask Claude to change · <kbd>Enter</kbd> expand / collapse · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves a comment</div>
+  <div class="help"><kbd>[</kbd> <kbd>]</kbd> commit · <kbd>j</kbd> <kbd>l</kbd> line · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen · <kbd>n</kbd> <kbd>p</kbd> next / previous comment · <kbd>k</kbd> comment on line · <kbd>u</kbd> submit review · <kbd>h</kbd> show / hide queue · <kbd>i</kbd> ask Claude · <kbd>m</kbd> ask Claude to change · <kbd>Enter</kbd> expand / collapse · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves a comment</div>
 </header>
 
 <main>
@@ -891,7 +891,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
       ']': () => go(current + 1), '[': () => go(current - 1), ArrowRight: () => stepComment(1), ArrowLeft: () => stepComment(-1),
       j: () => moveCursor(-1), ArrowUp: () => moveCursor(-1), l: () => moveCursor(1), ArrowDown: () => moveCursor(1),
       PageUp: () => pageCursor(-1), PageDown: () => pageCursor(1),
-      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), m: () => lineAction('.modbtn'), Enter: () => enterCursor()
+      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), Enter: () => enterCursor()
     }[e.key];
     if (act) { e.preventDefault(); act(); }
   });
