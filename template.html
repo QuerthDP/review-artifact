@@ -970,13 +970,15 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     const ln = rows[idx].previousElementSibling; if (ln && ln.matches && ln.matches('tr.line')) setCursor(ln, false);
     rows[idx].scrollIntoView({ block: 'center' }); flashRow(rows[idx].previousElementSibling || rows[idx]);
   }
-  // d, q and r act on the cards of the selected line or comment: dismiss or restore a conversation, queue, toggle Reviewed by Human.
+  // d, q and r act on the cards of the selected line or comment: dismiss or restore a conversation or reject or restore a comment, queue, toggle Reviewed by Human.
   function cardAction(sel, none) {
     const cur = current_(); let scope = [];
     if (lastCmt) scope = [lastCmt];
     else if (cur && (cur.classList.contains('gstop') || (cur.parentElement && cur.parentElement.classList.contains('thread')))) scope = [cur];
     else if (cur && cur.matches('tr.line')) { for (let n = cur.nextElementSibling; n && n.matches('tr.cmt'); n = n.nextElementSibling) scope.push(n); }
-    const b = scope.map(x => x.querySelector(sel)).find(Boolean);
+    // A list of selectors is tried in order of preference.
+    const sels = Array.isArray(sel) ? sel : [sel]; let b = null;
+    for (const one of sels) { b = scope.map(x => x.querySelector(one)).find(Boolean); if (b) break; }
     if (b) b.click(); else toast(none);
   }
   document.addEventListener('keydown', e => {
@@ -996,7 +998,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
       ']': () => go(current + 1), '[': () => go(current - 1), ArrowRight: () => toQueue(), ArrowLeft: () => toDiff(),
       j: () => moveCursor(-1), ArrowUp: () => region === 'queue' ? moveQ(-1) : arrowMove(-1), l: () => moveCursor(1), ArrowDown: () => region === 'queue' ? moveQ(1) : arrowMove(1),
       PageUp: () => pageCursor(-1), PageDown: () => pageCursor(1),
-      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), f: () => toggleFeedback(), d: () => cardAction('[data-act="dismiss"], [data-act="hidedisc"], .chat [data-act="restore"], [data-act="showdisc"]', 'Nothing to dismiss here'), q: () => cardAction('[data-act="approve"]', 'No proposed comment to queue here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), Enter: () => enterCursor()
+      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), f: () => toggleFeedback(), d: () => cardAction(['[data-act="dismiss"], .chat [data-act="restore"]', '[data-act="reject"], .card > .actions [data-act="restore"]', '[data-act="hidedisc"], [data-act="showdisc"]'], 'Nothing to dismiss here'), q: () => cardAction('[data-act="approve"]', 'No proposed comment to queue here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), Enter: () => enterCursor()
     };
     const act = keys[e.key] || (e.key.length === 1 ? keys[e.key.toLowerCase()] : null);
     if (act) { e.preventDefault(); if (e.key.length === 1) toDiff(); act(); }
