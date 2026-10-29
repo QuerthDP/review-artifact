@@ -245,7 +245,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     doc.querySelectorAll('a').forEach(a => { a.target = '_blank'; a.rel = 'noopener'; });
     return doc.body.firstChild.innerHTML;
   }
-  const isReply = x => !!x.replyTo;
+  const isReply = x => !!(x.replyTo || x.replyToConv);
   const ghOpen = new Set(), ghClosed = new Set(); // per-view expand state of reviewer threads, kept across re-renders
   function ghThreadCard(t) {
     const d = document.createElement('details'); d.className = 'ghthread';
@@ -410,7 +410,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     const el = document.querySelector('[data-cid="' + c.id + '"]') || document.getElementById('commit');
     notifyClaude({ id: c.id }, what + (c.githubCommentId ? ' (GitHub comment ' + c.githubCommentId + ')' : ''), el, 'github sync');
   }
-  const affectsGitHub = (c, status) => c.source !== 'github' && (c.inDraft || status === 'queued');
+  const affectsGitHub = (c, status) => c.source !== 'github' && !c.replyToConv && (c.inDraft || status === 'queued');
   async function remove(id) {
     if (!db) return false;
     const c = comments[id];
@@ -442,9 +442,10 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   }
   async function createComment(anchor, body) {
     const id = newId();
-    const doc = { commit: anchor.commit, path: anchor.path || null, line: anchor.line || null, side: anchor.side || null, replyTo: anchor.replyTo || null, body, author: 'user', status: 'queued', syncPending: true, createdAt: new Date().toISOString() };
+    const conv = !!anchor.replyToConv; // PR conversation replies can't live in a pending review: they wait here until posted
+    const doc = { commit: anchor.commit, path: anchor.path || null, line: anchor.line || null, side: anchor.side || null, replyTo: anchor.replyTo || null, replyToConv: anchor.replyToConv || null, convAuthor: anchor.convAuthor || null, body, author: 'user', status: 'queued', syncPending: !conv, createdAt: new Date().toISOString() };
     const ok = await write(id, doc, true);
-    if (ok) { openComposer = null; toast('Queued; adding to your GitHub draft'); syncGitHub(Object.assign({ id }, doc), 'new comment'); }
+    if (ok) { openComposer = null; if (conv) toast('Queued; posted when you click "Post queued conversation replies"'); else { toast('Queued; adding to your GitHub draft'); syncGitHub(Object.assign({ id }, doc), 'new comment'); } }
   }
 
   // ---------- render ----------
@@ -469,7 +470,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     const d = document.createElement('div'); d.className = 'card ' + c.status; d.dataset.cid = c.id;
     let actions = '';
     const badge = c.author === 'claude' ? '<span class="pill claude">Generated with Claude Code</span>' + (c.humanReviewed ? '<span class="pill queued">Reviewed by Human</span>' : '') : '<b>' + who + '</b>';
-    const head = '<div class="card-head">' + badge + '<span class="pill ' + c.status + '">' + (c.status === 'revise' ? 'revision requested' : c.status) + '</span>' + (c.editedByUser ? '<span>edited by you</span>' : '') + (c.revisedAt ? '<span>revised by Claude</span>' : '') + (c.path ? (c.line ? '' : '<span>file-level</span>') : '<span>commit-level</span>') + (c.syncPending ? '<span class="pill revise">syncing to GitHub…</span>' : c.source === 'github' || (c.inDraft && c.status === 'queued') ? '<span class="pill posted">in your GitHub draft</span>' : '') + '</div>';
+    const head = '<div class="card-head">' + badge + '<span class="pill ' + c.status + '">' + (c.status === 'revise' ? 'revision requested' : c.status) + '</span>' + (c.editedByUser ? '<span>edited by you</span>' : '') + (c.revisedAt ? '<span>revised by Claude</span>' : '') + (c.path ? (c.line ? '' : '<span>file-level</span>') : '<span>commit-level</span>') + (c.replyToConv && c.status === 'queued' ? '<span class="pill proposed">waits for "Post queued conversation replies"</span>' : c.syncPending ? '<span class="pill revise">syncing to GitHub…</span>' : c.source === 'github' || (c.inDraft && c.status === 'queued') ? '<span class="pill posted">in your GitHub draft</span>' : '') + '</div>';
     if (editing === c.id && c.author === 'claude') {
       d.innerHTML = head + '<div class="body">' + md(c.body) + '</div><div class="revise"><div class="hint">Tell Claude what to change. The comment stays as is until Claude rewrites it.</div><textarea id="ta-' + c.id + '" placeholder="e.g. shorter, drop the sudo detail, suggest skipping CLONE_NEWUSER when root instead"></textarea><div class="actions"><button class="btn primary small" data-act="sendnote">Send to Claude</button><button class="btn small" data-act="canceledit">Cancel</button></div></div>';
     } else if (editing === c.id) {
@@ -508,7 +509,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   function composer(anchor) {
     const d = document.createElement('div'); d.className = 'composer';
     const where = anchor.path ? anchor.path + (anchor.line ? ':' + anchor.line : '') : 'commit-level comment on ' + COMMITS[anchor.commitIdx].short;
-    d.innerHTML = '<div class="hint">' + (anchor.replyTo ? 'Reply' : 'New comment') + ' · ' + esc(where) + ' · queued as yours</div><textarea id="composer-ta" placeholder="Write the review comment as it should appear on GitHub"></textarea><div class="actions"><button class="btn primary small" id="composer-save">Queue comment</button><button class="btn small" id="composer-cancel">Cancel</button></div>';
+    d.innerHTML = '<div class="hint">' + (anchor.replyToConv ? 'Reply to ' + esc(anchor.convAuthor || '') + ' in the PR conversation · queued until you post it' : (anchor.replyTo ? 'Reply' : 'New comment') + ' · ' + esc(where) + ' · queued as yours') + '</div><textarea id="composer-ta" placeholder="Write the review comment as it should appear on GitHub"></textarea><div class="actions"><button class="btn primary small" id="composer-save">Queue comment</button><button class="btn small" id="composer-cancel">Cancel</button></div>';
     d.querySelector('#composer-save').onclick = () => { const v = d.querySelector('#composer-ta').value.trim(); if (v) createComment(anchor, v); };
     d.querySelector('#composer-cancel').onclick = () => { openComposer = null; renderAll(); };
     setTimeout(() => { const t = d.querySelector('#composer-ta'); if (t) t.focus(); }, 0);
@@ -538,13 +539,26 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     ghAt(c.sha, null, null).forEach(t => g.appendChild(ghThreadCard(t)));
     if (GH.conversation.length) {
       const pc = document.createElement('details'); pc.className = 'ghthread';
-      pc.innerHTML = '<summary class="card-head"><b>PR conversation</b><span>' + GH.conversation.length + ' items · read-only (replies there post immediately, so use GitHub)</span></summary>' +
-        GH.conversation.map(c => '<div class="ghc"><div class="ghwho"><b>' + esc(c.author) + '</b> <span>' + esc(c.kind) + ' · ' + esc((c.at || '').slice(0, 10)) + '</span> <a href="' + esc(c.url) + '" target="_blank" rel="noopener">open</a></div><div class="ghbody">' + cleanHTML(c.html) + '</div></div>').join('');
+      pc.open = ghOpen.has('pr-conv') || !!(openComposer && openComposer.replyToConv);
+      pc.addEventListener('toggle', () => { if (pc.open) ghOpen.add('pr-conv'); else ghOpen.delete('pr-conv'); });
+      pc.innerHTML = '<summary class="card-head"><b>PR conversation</b><span>' + GH.conversation.length + ' items · replies are queued and posted together when you click "Post queued conversation replies"</span></summary>';
+      GH.conversation.forEach(c => {
+        const item = document.createElement('div'); item.className = 'ghc';
+        item.innerHTML = '<div class="ghwho"><b>' + esc(c.author) + '</b> <span>' + esc(c.kind) + ' · ' + esc((c.at || '').slice(0, 10)) + '</span> <a href="' + esc(c.url) + '" target="_blank" rel="noopener">open</a></div><div class="ghbody">' + cleanHTML(c.html) + '</div>';
+        Object.values(comments).filter(x => x.replyToConv === c.url).forEach(x => item.appendChild(card(x)));
+        if (openComposer && openComposer.replyToConv === c.url) item.appendChild(composer(openComposer));
+        else {
+          const b = document.createElement('button'); b.className = 'btn small'; b.textContent = 'Reply (queue)';
+          b.onclick = () => { openComposer = { commit: COMMITS[current].sha, commitIdx: current, replyToConv: c.url, convAuthor: c.author }; editing = null; renderAll(); };
+          const row = document.createElement('div'); row.className = 'actions'; row.appendChild(b); item.appendChild(row);
+        }
+        pc.appendChild(item);
+      });
       g.appendChild(pc);
     }
     if (openAsk && openAsk.commitIdx === current && !openAsk.path && openAsk.kind !== 'feedback') g.appendChild(askComposer(openAsk, h2));
     if (orphan.length) { const h = document.createElement('div'); h.className = 'empty'; h.textContent = 'Anchored to files not in this commit:'; g.appendChild(h); orphan.forEach(x => g.appendChild(card(x))); }
-    if (openComposer && openComposer.commitIdx === current && !openComposer.path && !openComposer.replyTo) g.appendChild(composer(openComposer));
+    if (openComposer && openComposer.commitIdx === current && !openComposer.path && !openComposer.replyTo && !openComposer.replyToConv) g.appendChild(composer(openComposer));
     else {
       const row = document.createElement('div'); row.className = 'actions';
       const b = document.createElement('button'); b.className = 'btn small'; b.textContent = '+ Queue a commit-level GitHub comment'; b.dataset.k = '1'; b.onclick = () => { openComposer = { commit: c.sha, commitIdx: current }; renderAll(); }; row.appendChild(b);
@@ -699,6 +713,14 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
         g.appendChild(b);
       });
       el.appendChild(g);
+    }
+    const convQueued = all.filter(x => x.replyToConv && x.status === 'queued');
+    if (convQueued.length) {
+      const g = document.createElement('div'); g.className = 'qgroup';
+      const b = document.createElement('button'); b.className = 'btn primary small'; b.textContent = 'Post ' + convQueued.length + ' queued conversation repl' + (convQueued.length > 1 ? 'ies' : 'y');
+      b.title = 'Claude posts them on the PR conversation now (they are public immediately)';
+      b.onclick = () => { if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Click again: post publicly now'; return; } notifyClaude({ id: 'conv-' + Date.now().toString(36) }, convQueued.map(x => x.id).join(', '), document.getElementById('queue'), 'post conversation replies'); convQueued.forEach(x => write(x.id, { syncPending: true }, false)); toast('Sent to Claude to post'); };
+      g.appendChild(b); el.appendChild(g);
     }
     const groups = [['revise', 'Sent to Claude for revision'], ['queued', 'Queued: in your GitHub draft'], ['proposed', 'Proposed by Claude, awaiting your call'], ['rejected', 'Rejected'], ['posted', 'Posted']];
     groups.forEach(([st, label]) => {
