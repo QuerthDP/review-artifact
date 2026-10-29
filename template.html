@@ -161,7 +161,8 @@ tr.hunk td { background: var(--hunk-bg); color: var(--muted); padding: 2px 10px 
 tr.kcur td { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
 tr.kcur td:first-child { box-shadow: inset 3px 0 0 var(--accent), inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
 .file-head.kcur { box-shadow: inset 0 0 0 2px var(--accent); }
-.gstop.kcur { box-shadow: 0 0 0 2px var(--accent); border-radius: 8px; }
+.gstop.kcur, .thread > .kcur { box-shadow: 0 0 0 2px var(--accent); border-radius: 8px; }
+#stepper .step.qcur { outline: 2px solid var(--accent); outline-offset: 1px; }
 .xbtns { display: inline-flex; gap: 4px; margin-right: 8px; vertical-align: middle; }
 .xbtn { border: 1px solid var(--line); background: var(--panel); color: var(--accent, var(--fg)); border-radius: 4px; padding: 0 6px; font: inherit; font-size: 11px; cursor: pointer; line-height: 18px; }
 .xbtn:hover { background: var(--accent-soft, var(--bg)); }
@@ -253,7 +254,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   const isReply = x => !!(x.replyTo || x.replyToConv);
   const ghOpen = new Set(), ghClosed = new Set(); // per-view expand state of reviewer threads, kept across re-renders
   function ghThreadCard(t) {
-    const d = document.createElement('details'); d.className = 'ghthread';
+    const d = document.createElement('details'); d.className = 'ghthread'; d.id = 'ghs-' + t.id;
     d.open = ghOpen.has(t.id) || (!t.resolved && !ghClosed.has(t.id)) || !!(openComposer && openComposer.replyTo === t.id);
     d.addEventListener('toggle', () => { if (d.open) { ghOpen.add(t.id); ghClosed.delete(t.id); } else { ghOpen.delete(t.id); ghClosed.add(t.id); } });
     const pills = (t.resolved ? '<span class="pill rejected">resolved</span>' : '<span class="pill proposed">open</span>') + (t.outdated ? '<span class="pill rejected">outdated</span>' : '');
@@ -337,7 +338,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     return d;
   }
   function threadCard(t, el) {
-    const d = document.createElement('div'); d.className = 'chat';
+    const d = document.createElement('div'); d.className = 'chat'; d.id = 'chs-' + t.id;
     const msgs = (t.messages || []).map(m => '<div class="msg-row ' + m.role + '"><span class="who">' + (m.role === 'claude' ? 'Claude' : 'You') + '</span><div class="body">' + md(m.text) + '</div></div>').join('');
     const pending = t.status === 'asked' ? '<div class="pending">Waiting for Claude' + (t.shellThreadId ? '' : ' (not notified: tell Claude in chat to answer page questions)') + '</div>' : '';
     d.innerHTML = '<div class="card-head"><b>' + (t.kind === 'modify' ? 'Change request to Claude' : t.kind === 'feedback' ? 'Feedback on the tool' : 'Conversation with Claude') + '</b>' + (t.path ? '' : '<span>commit-level</span>') + (t.dismissed ? '<span class="pill rejected">dismissed</span><button class="btn small dismiss" data-act="restore">Restore</button>' : t.status === 'answered' ? '<button class="btn small dismiss" data-act="dismiss" title="Hide this answered conversation; it can be restored from the queue">Dismiss</button>' : '') + '</div>' + msgs + pending + '<div class="followup"><textarea id="fu-' + t.id + '" placeholder="Follow up"></textarea><button class="btn small ask" data-act="followup">Send</button></div>';
@@ -480,7 +481,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
 
   function card(c) {
     const who = c.author === 'claude' ? 'Claude' : 'You';
-    const d = document.createElement('div'); d.className = 'card ' + c.status; d.dataset.cid = c.id;
+    const d = document.createElement('div'); d.className = 'card ' + c.status; d.dataset.cid = c.id; d.id = 'cds-' + c.id;
     let actions = '';
     const badge = c.author === 'claude' ? '<span class="pill claude">Generated with Claude Code</span>' + (c.humanReviewed ? '<span class="pill queued">Reviewed by Human</span>' : '') : '<b>' + who + '</b>';
     const head = '<div class="card-head">' + badge + '<span class="pill ' + c.status + '">' + (c.status === 'revise' ? 'revision requested' : c.status) + '</span>' + (c.editedByUser ? '<span>edited by you</span>' : '') + (c.revisedAt ? '<span>revised by Claude</span>' : '') + (c.path ? (c.line ? '' : '<span>file-level</span>') : '<span>commit-level</span>') + (c.replyToConv && c.status === 'queued' ? '<span class="pill proposed">waits for "Post queued conversation replies"</span>' : c.syncPending ? '<span class="pill revise">syncing to GitHub…</span>' : c.source === 'github' || (c.inDraft && c.status === 'queued') ? '<span class="pill posted">in your GitHub draft</span>' : '') + '</div>';
@@ -761,10 +762,10 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     st.forEach((b, i) => b.classList.toggle('qcur', region === 'queue' && i === qCur));
     if (scroll && region === 'queue' && st[qCur]) st[qCur].scrollIntoView({ block: 'nearest' });
   }
-  function toQueue() { if (region === 'queue' || !qStops().length) return; region = 'queue'; markQ(true); }
-  function toDiff() { if (region !== 'queue') return; region = 'diff'; markQ(false); }
+  function toQueue() { if (region !== 'diff' || !qStops().length) return; region = 'queue'; markQ(true); }
+  function toDiff() { if (region === 'commits') { region = 'diff'; markStep(); return; } if (region !== 'queue') return; region = 'diff'; markQ(false); }
   function moveQ(d) { qCur += d; markQ(true); }
-  function renderAll() { renderStepper(); renderCommit(); renderFiles(); renderQueue(); measureHead(); renderFeedback(); restoreDrafts(); saveUi(); markQ(false); }
+  function renderAll() { renderStepper(); renderCommit(); renderFiles(); renderQueue(); measureHead(); renderFeedback(); restoreDrafts(); saveUi(); markQ(false); markStep(); }
   function closeAll() { openComposer = null; openAsk = null; editing = null; fbOpen = false; showFbDone = false; fbCur = 0; subOpen = false; renderSubmit(); renderAll(); }
   // Submitting the review is the viewer's explicit, two-click action; Claude performs it on GitHub when notified.
   let subOpen = false;
@@ -866,8 +867,31 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   function nearestStop(list, y) { let best = list[0], bd = Infinity; list.forEach(el => { const d = Math.abs(el.getBoundingClientRect().top - y); if (d < bd) { bd = d; best = el; } }); return best; }
   function moveCursor(dir) {
     const list = stops(); if (!list.length) return; lastCmt = null;
-    const cur = current_(); const i = cur ? list.indexOf(cur) : -1;
+    const cur = lineOf(current_()); const i = cur ? list.indexOf(cur) : -1;
     setCursor(i < 0 ? nearestStop(list, 160) : list[Math.max(0, Math.min(list.length - 1, i + dir))]);
+  }
+  // A selected comment card stands for the diff line it hangs under (j / l, k, i, m); file-level cards for the file header.
+  function lineOf(el) {
+    if (!el || !el.parentElement || !el.parentElement.classList.contains('thread')) return el;
+    const tr = el.closest('tr.cmt'); if (tr) return tr.previousElementSibling;
+    const sec = el.closest('.file'); return sec ? sec.querySelector('.file-head') : el;
+  }
+  // Arrows also stop on each comment card, reviewer thread and conversation, so the keyboard can enter them; Up from the top reaches the commit stepper.
+  const arrowStops = () => Array.from(document.querySelectorAll('#commit .gstop, #files .file-head, #files tr.line, #files tr.hunk, #files .thread > .card, #files .thread > .chat, #files .thread > .ghthread')).filter(el => !el.closest('[hidden]') && (el.classList.contains('file-head') || !el.closest('.collapsed')));
+  function arrowMove(dir) {
+    const list = arrowStops(); if (!list.length) return; lastCmt = null;
+    const cur = current_(); const i = cur ? list.indexOf(cur) : -1;
+    if (i === 0 && dir < 0) { toCommits(); return; }
+    setCursor(i < 0 ? nearestStop(list, 160) : list[Math.max(0, Math.min(list.length - 1, i + dir))]);
+  }
+  function toCommits() { region = 'commits'; document.querySelectorAll('.kcur').forEach(x => x.classList.remove('kcur')); markStep(); window.scrollTo({ top: 0 }); }
+  function markStep() { document.querySelectorAll('#stepper .step').forEach((b, i) => b.classList.toggle('qcur', region === 'commits' && i === current)); const a = document.querySelector('#stepper .step.qcur'); if (a) a.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+  function fromCommits() { region = 'diff'; markStep(); const list = arrowStops(); if (list.length) setCursor(list[0]); }
+  // Enter on a card opens its reply: the reviewer thread's reply box, the follow-up to Claude, or a revision note / edit of a comment.
+  function enterCard(cur) {
+    if (cur.classList.contains('ghthread')) { cur.open = true; const b = Array.from(cur.querySelectorAll(':scope > .actions .btn')).pop(); if (b) b.click(); return; }
+    if (cur.classList.contains('chat')) { const t = cur.querySelector('.followup textarea'); if (t) t.focus(); return; }
+    const b = cur.querySelector('[data-act="edit"]'); if (b) b.click(); else toast('Nothing to reply to here');
   }
   function pageCursor(dir) {
     const cur = current_(); const y = cur ? cur.getBoundingClientRect().top : 160;
@@ -875,13 +899,14 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     const list = stops(); if (list.length) setCursor(nearestStop(list, Math.max(160, Math.min(y, window.innerHeight - 80))), false);
   }
   function lineAction(sel) {
-    const cur = current_();
+    const cur = lineOf(current_());
     if (cur && cur.classList.contains('gstop')) { const b = document.querySelector(sel === '.askbtn' ? '#commit [data-i]' : sel === '.addbtn' ? '#commit [data-k]' : null); if (b) b.click(); else toast('Not available at commit level'); return; }
     if (!cur || !cur.matches('tr.line')) { toast('Select a line first (j / l)'); return; }
     const btns = cur.querySelectorAll(sel); const b = Array.from(btns).find(x => x.dataset.side === 'RIGHT') || btns[btns.length - 1]; if (b) b.click();
   }
   function enterCursor() {
     const cur = current_(); if (!cur) return;
+    if (cur.parentElement && cur.parentElement.classList.contains('thread')) { enterCard(cur); return; }
     if (cur.classList.contains('gstop')) { if (cur.tagName === 'DETAILS') cur.open = !cur.open; else lineAction('.addbtn'); }
     else if (cur.classList.contains('file-head')) cur.querySelector('[data-toggle]').click();
     else if (cur.classList.contains('hunk')) {
@@ -917,7 +942,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   function cardAction(sel, none) {
     const cur = current_(); let scope = [];
     if (lastCmt) scope = [lastCmt];
-    else if (cur && cur.classList.contains('gstop')) scope = [cur];
+    else if (cur && (cur.classList.contains('gstop') || (cur.parentElement && cur.parentElement.classList.contains('thread')))) scope = [cur];
     else if (cur && cur.matches('tr.line')) { for (let n = cur.nextElementSibling; n && n.matches('tr.cmt'); n = n.nextElementSibling) scope.push(n); }
     const b = scope.map(x => x.querySelector(sel)).find(Boolean);
     if (b) b.click(); else toast(none);
@@ -931,11 +956,12 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     if (e.key === 'Escape') { closeAll(); return; }
     if (fbOpen && fbKey(e.key)) { e.preventDefault(); return; }
+    if (region === 'commits' && e.key.startsWith('Arrow')) { e.preventDefault(); if (e.key === 'ArrowLeft') { go(current - 1); toCommits(); } else if (e.key === 'ArrowRight') { go(current + 1); toCommits(); } else if (e.key === 'ArrowDown') fromCommits(); return; }
     if (region === 'queue' && e.key === 'Enter') { e.preventDefault(); const b = qStops()[qCur]; if (b) { if (b.classList.contains('qitem')) toDiff(); b.click(); } return; }
     if (e.key === 'Enter' && e.target.closest && e.target.closest('button, a, label')) return;
     const keys = {
       ']': () => go(current + 1), '[': () => go(current - 1), ArrowRight: () => toQueue(), ArrowLeft: () => toDiff(),
-      j: () => moveCursor(-1), ArrowUp: () => region === 'queue' ? moveQ(-1) : moveCursor(-1), l: () => moveCursor(1), ArrowDown: () => region === 'queue' ? moveQ(1) : moveCursor(1),
+      j: () => moveCursor(-1), ArrowUp: () => region === 'queue' ? moveQ(-1) : arrowMove(-1), l: () => moveCursor(1), ArrowDown: () => region === 'queue' ? moveQ(1) : arrowMove(1),
       PageUp: () => pageCursor(-1), PageDown: () => pageCursor(1),
       n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), f: () => toggleFeedback(), d: () => cardAction('[data-act="dismiss"], [data-act="hidedisc"]', 'Nothing to dismiss here'), q: () => cardAction('[data-act="approve"]', 'No proposed comment to queue here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), Enter: () => enterCursor()
     };
