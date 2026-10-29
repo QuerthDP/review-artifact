@@ -206,6 +206,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
 .qitem .snip { font-size: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .banner { background: var(--proposed-soft); color: var(--proposed); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
 .empty { color: var(--muted); font-size: 13px; }
+#ghstatus { position: fixed; top: calc(var(--head-h, 60px) + 8px); left: 50%; transform: translateX(-50%); z-index: 60; background: var(--panel, #fff); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,.15); }
 .toast { position: fixed; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; box-shadow: var(--shadow); z-index: 20; }
 @media (prefers-reduced-motion: no-preference) { .toast { animation: fade .25s ease-out; } @keyframes fade { from { opacity: 0; transform: translate(-50%, 6px); } } }
 </style>
@@ -273,7 +274,9 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   }
   function ghAt(sha, path, refs) { return GH.threads.filter(t => t.commit === sha && t.path === path && (refs ? refs.some(r => t.line === r.line && t.side === r.side) : !t.line)); }
   const PR_MINE = __PR_MINE__; // the viewer authored the PR: change requests edit and commit locally instead of suggesting
-  const REPO = 'https://github.com/__REPO_SLUG__';
+  const REPO = 'https://github.com/__REPO_SLUG__', REPO_SLUG = '__REPO_SLUG__', PR_NUMBER = __PR_NUMBER__;
+  // Submitting goes straight to GitHub through the viewer's GitHub connector; Claude is the fallback.
+  const GH_SERVER = 'Github CoPilot'; let mcp = null;
   const COLLAPSED_DEFAULT = new Set(__COLLAPSED_JSON__);
   let db = null, dbReady = false;
   let cm = null;               // comments capability: used only to notify Claude's session; the conversation itself lives in the db
@@ -791,10 +794,34 @@ body.nopointer, body.nopointer * { cursor: none !important; }
       const ev = p.querySelector('input[name=subev]:checked').value, label = { COMMENT: 'comment', APPROVE: 'approve', REQUEST_CHANGES: 'request changes' }[ev];
       if (!go.dataset.armed) { go.dataset.armed = '1'; go.textContent = 'Click again: submit as "' + label + '" (public)'; return; }
       const body = p.querySelector('#sub-body').value.trim(), withConv = !!(p.querySelector('#sub-conv') || {}).checked;
+      // Docs still syncing need Claude to update the draft first, so those submits go through Claude.
+      if (mcp && !syncing) {
+        go.disabled = true; go.textContent = 'Submitting to GitHub…'; ghStatus('Submitting your review to GitHub…');
+        try { await submitDirect(ev, body, withConv); dropDraft('sub-body'); subOpen = false; renderSubmit(); ghStatus('Review submitted on GitHub', REPO + '/pull/' + PR_NUMBER, 6000); return; }
+        catch (e) { ghStatus(null); toast('GitHub call failed (' + (e && e.code || 'error') + '); asking Claude to submit'); }
+      }
       const sent = await notifyClaude({ id: 'submit-' + Date.now().toString(36) }, 'event=' + ev + ' postConversationReplies=' + (withConv ? 'yes' : 'no') + '\n' + body, document.getElementById('submitrev'), 'submit review');
       if (sent) dropDraft('sub-body'); subOpen = false; renderSubmit(); toast(sent ? 'Sent to Claude: submitting your review' : 'Claude was not notified; tell Claude in chat to submit');
     };
     document.body.appendChild(p); restoreDrafts(); saveUi(); setTimeout(() => p.querySelector('#sub-body').focus(), 0);
+  }
+  // A status line that stays up while GitHub works; a link when done.
+  function ghStatus(msg, href, ms) {
+    let el = document.getElementById('ghstatus'); if (!msg) { if (el) el.remove(); return; }
+    if (!el) { el = document.createElement('div'); el.id = 'ghstatus'; document.body.appendChild(el); }
+    el.textContent = msg + (href ? ' · ' : ''); if (href) { const a = document.createElement('a'); a.href = href; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'open on GitHub'; el.appendChild(a); }
+    if (ms) setTimeout(() => { if (el.isConnected && el.firstChild && el.firstChild.textContent.startsWith(msg)) el.remove(); }, ms);
+  }
+  async function submitDirect(ev, body, withConv) {
+    const [owner, repo] = REPO_SLUG.split('/'), now = new Date().toISOString();
+    if (withConv) for (const c of Object.values(comments).filter(x => x.status === 'queued' && x.replyToConv)) {
+      ghStatus('Posting conversation replies…');
+      const r = await mcp.callTool(GH_SERVER, 'add_issue_comment', { owner, repo, issue_number: PR_NUMBER, body: 'In reply to [' + (c.convAuthor || 'comment') + '](' + c.replyToConv + '):\n\n' + c.body });
+      await write(c.id, { status: 'posted', githubUrl: (r && r.payload && r.payload.html_url) || null, postedAt: now });
+    }
+    ghStatus('Submitting your review to GitHub…');
+    await mcp.callTool(GH_SERVER, 'pull_request_review_write', { method: 'submit_pending', owner, repo, pullNumber: PR_NUMBER, event: ev, body });
+    for (const c of Object.values(comments).filter(x => x.status === 'queued' && !x.replyToConv)) await write(c.id, { status: 'posted', postedAt: now });
   }
   // Feedback conversations with Claude live in a panel by the Feedback button, never in the diff.
   let fbOpen = false, showFbDone = false;
@@ -999,6 +1026,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   renderAll(); restorePos();
 
   window.claude && window.claude.use && window.claude.use('comments').then(ns => { cm = ns; });
+  window.claude && window.claude.use && window.claude.use('mcp').then(ns => { mcp = ns; });
   window.claude && window.claude.use && window.claude.use('db').then(ns => {
     db = ns;
     if (!db) { document.getElementById('dbbanner').hidden = false; dbReady = true; renderQueue(); return; }
