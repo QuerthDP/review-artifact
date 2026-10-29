@@ -220,7 +220,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     </div>
   </div>
   <div class="stepper" id="stepper" role="tablist"></div>
-  <div class="help"><kbd>[</kbd> <kbd>]</kbd> commit · <kbd>j</kbd> <kbd>l</kbd> line · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen · <kbd>n</kbd> <kbd>p</kbd> next / previous comment · <kbd>k</kbd> comment on line · <kbd>u</kbd> submit review · <kbd>f</kbd> feedback · <kbd>d</kbd> dismiss · <kbd>h</kbd> show / hide queue · <kbd>i</kbd> ask Claude · <kbd>m</kbd> ask Claude to change · <kbd>Enter</kbd> expand / collapse · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves a comment</div>
+  <div class="help"><kbd>[</kbd> <kbd>]</kbd> commit · <kbd>j</kbd> <kbd>l</kbd> line · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen · <kbd>n</kbd> <kbd>p</kbd> next / previous comment · <kbd>k</kbd> comment on line · <kbd>u</kbd> submit review · <kbd>f</kbd> feedback · <kbd>d</kbd> dismiss · <kbd>q</kbd> queue · <kbd>r</kbd> Reviewed by Human · <kbd>Esc</kbd> close · <kbd>h</kbd> show / hide queue · <kbd>i</kbd> ask Claude · <kbd>m</kbd> ask Claude to change · <kbd>Enter</kbd> expand / collapse · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves a comment</div>
 </header>
 
 <main>
@@ -309,7 +309,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     const ok = await writeThread(id, Object.assign({}, t, { shellThreadId }), true);
     sending = false;
     if (ok) {
-      openAsk = null; toast(shellThreadId ? 'Sent to Claude' : 'Question saved');
+      dropDraft(t.kind === 'feedback' ? 'fb' : 'a|' + draftKey(anchor)); openAsk = null; toast(shellThreadId ? 'Sent to Claude' : 'Question saved');
       // The feedback panel keeps unsent drafts across re-renders; a sent message must not come back.
       if (t.kind === 'feedback') { const ta = document.querySelector('#fb-panel #ask-ta'); if (ta) ta.value = ''; renderFeedback(); }
     }
@@ -320,17 +320,17 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     const messages = (t.messages || []).concat([{ role: 'user', text, at: new Date().toISOString() }]);
     const ok = await writeThread(t.id, { messages, status: 'asked', dismissed: false, shellThreadId: shellThreadId || t.shellThreadId || null, updatedAt: new Date().toISOString() }, false);
     sending = false;
-    if (ok) toast(shellThreadId ? 'Sent to Claude' : 'Follow-up saved');
+    if (ok) { dropDraft('fu-' + t.id); toast(shellThreadId ? 'Sent to Claude' : 'Follow-up saved'); }
   }
   function askComposer(anchor, el) {
     const d = document.createElement('div'); d.className = 'composer'; d.style.borderColor = 'var(--posted)';
     const where = anchor.path ? anchor.path + (anchor.line ? ':' + anchor.line : '') : 'commit ' + COMMITS[anchor.commitIdx].short;
     const mod = anchor.kind === 'modify', fb = anchor.kind === 'feedback';
     const hint = fb ? 'Claude writes it up and files an issue on <a href="https://github.com/' + FEEDBACK_REPO + '" target="_blank" rel="noopener">' + FEEDBACK_REPO + '</a>, then replies here with the issue link' : mod ? 'Ask Claude to change · ' + esc(where) + ' · ' + (PR_MINE ? 'your PR: Claude edits the code and commits it locally (the previous version is kept); nothing is pushed' : 'Claude drafts a <code>```suggestion</code> comment for you to queue') : 'Ask Claude · ' + esc(where) + ' · the question and answer stay here on the page';
-    d.innerHTML = '<div class="hint">' + hint + '</div><textarea id="ask-ta" placeholder="' + (fb ? 'What bothers you about the tool, or what is missing?' : mod ? 'What should change here?' : 'What do you want to know about this code?') + '"></textarea><div class="actions"><button class="btn primary small" id="ask-send">' + (fb ? 'Send to Claude' : mod ? 'Ask Claude to change it' : 'Ask Claude') + '</button><button class="btn small" id="ask-cancel">Cancel</button></div>';
+    d.innerHTML = '<div class="hint">' + hint + '</div><textarea id="ask-ta" data-draft="' + (fb ? 'fb' : 'a|' + esc(draftKey(anchor))) + '" placeholder="' + (fb ? 'What bothers you about the tool, or what is missing?' : mod ? 'What should change here?' : 'What do you want to know about this code?') + '"></textarea><div class="actions"><button class="btn primary small" id="ask-send">' + (fb ? 'Send to Claude' : mod ? 'Ask Claude to change it' : 'Ask Claude') + '</button><button class="btn small" id="ask-cancel">Cancel</button></div>';
     if (mod) d.style.borderColor = 'var(--proposed)';
     d.querySelector('#ask-send').onclick = () => { const v = d.querySelector('#ask-ta').value.trim(); if (v) sendQuestion(anchor, v, el); };
-    d.querySelector('#ask-cancel').onclick = () => { openAsk = null; renderAll(); };
+    d.querySelector('#ask-cancel').onclick = () => { dropDraft(fb ? 'fb' : 'a|' + draftKey(anchor)); openAsk = null; renderAll(); };
     setTimeout(() => { const t = d.querySelector('#ask-ta'); if (t) t.focus(); }, 0);
     return d;
   }
@@ -395,6 +395,14 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   }
   function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  // Unsent text and open composers survive a page reload; a draft goes away when it is sent or cancelled.
+  const draftKey = a => [a.kind || '', a.commit, a.path || '', a.line || '', a.side || '', a.replyTo || '', a.replyToConv || ''].join('|');
+  let drafts = {}; try { drafts = JSON.parse(lsGet('drafts') || '{}') || {}; } catch (e) {}
+  const taKey = ta => ta.dataset.draft || ta.id;
+  function dropDraft(k) { if (k in drafts) { delete drafts[k]; lsSet('drafts', JSON.stringify(drafts)); } }
+  function restoreDrafts() { document.querySelectorAll('textarea').forEach(ta => { const k = taKey(ta); if (k && drafts[k] && ta.value !== drafts[k]) ta.value = drafts[k]; }); }
+  document.addEventListener('input', e => { const ta = e.target; if (ta.tagName !== 'TEXTAREA' || !taKey(ta)) return; if (ta.value.trim()) drafts[taKey(ta)] = ta.value; else delete drafts[taKey(ta)]; lsSet('drafts', JSON.stringify(drafts)); });
+  function saveUi() { lsSet('ui', JSON.stringify({ openComposer, openAsk, editing, fbOpen, subOpen })); }
   function toast(msg) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 2200); }
   function newId() { return 'c_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7); }
   function byCommit(sha) { return Object.values(comments).filter(c => c.commit === sha); }
@@ -433,7 +441,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   }
   async function saveEdit(id, body) {
     const ok = await write(id, { body, status: 'queued', editedByUser: true, syncPending: true, updatedAt: new Date().toISOString() }, false);
-    if (ok) { editing = null; toast('Edited; updating your GitHub draft'); syncGitHub(comments[id] || { id }, 'edited by you'); }
+    if (ok) { dropDraft('ta-' + id); editing = null; toast('Edited; updating your GitHub draft'); syncGitHub(comments[id] || { id }, 'edited by you'); }
   }
   async function sendNote(id, note, el) {
     const c = comments[id]; if (!c) return;
@@ -441,14 +449,14 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     const at = new Date().toISOString();
     const discussion = (c.discussion || []).concat([{ role: 'user', text: note, at }]);
     const ok = await write(id, { status: 'revise', discussionHidden: false, note, prevStatus: c.status, noteAt: at, discussion, shellThreadId: shellThreadId || c.shellThreadId || null }, false);
-    if (ok) { editing = null; toast(shellThreadId ? 'Sent to Claude' : 'Saved; Claude not notified'); }
+    if (ok) { dropDraft('ta-' + id); editing = null; toast(shellThreadId ? 'Sent to Claude' : 'Saved; Claude not notified'); }
   }
   async function createComment(anchor, body) {
     const id = newId();
     const conv = !!anchor.replyToConv; // PR conversation replies can't live in a pending review: they wait here until posted
     const doc = { commit: anchor.commit, path: anchor.path || null, line: anchor.line || null, side: anchor.side || null, replyTo: anchor.replyTo || null, replyToConv: anchor.replyToConv || null, convAuthor: anchor.convAuthor || null, body, author: 'user', status: 'queued', syncPending: !conv, createdAt: new Date().toISOString() };
     const ok = await write(id, doc, true);
-    if (ok) { openComposer = null; if (conv) toast('Queued; posted when you click "Post queued conversation replies"'); else { toast('Queued; adding to your GitHub draft'); syncGitHub(Object.assign({ id }, doc), 'new comment'); } }
+    if (ok) { dropDraft('c|' + draftKey(anchor)); openComposer = null; if (conv) toast('Queued; posted when you click "Post queued conversation replies"'); else { toast('Queued; adding to your GitHub draft'); syncGitHub(Object.assign({ id }, doc), 'new comment'); } }
   }
 
   // ---------- render ----------
@@ -515,9 +523,9 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   function composer(anchor) {
     const d = document.createElement('div'); d.className = 'composer';
     const where = anchor.path ? anchor.path + (anchor.line ? ':' + anchor.line : '') : 'commit-level comment on ' + COMMITS[anchor.commitIdx].short;
-    d.innerHTML = '<div class="hint">' + (anchor.replyToConv ? 'Reply to ' + esc(anchor.convAuthor || '') + ' in the PR conversation · queued until you post it' : (anchor.replyTo ? 'Reply' : 'New comment') + ' · ' + esc(where) + ' · queued as yours') + '</div><textarea id="composer-ta" placeholder="Write the review comment as it should appear on GitHub"></textarea><div class="actions"><button class="btn primary small" id="composer-save">Queue comment</button><button class="btn small" id="composer-cancel">Cancel</button></div>';
+    d.innerHTML = '<div class="hint">' + (anchor.replyToConv ? 'Reply to ' + esc(anchor.convAuthor || '') + ' in the PR conversation · queued until you post it' : (anchor.replyTo ? 'Reply' : 'New comment') + ' · ' + esc(where) + ' · queued as yours') + '</div><textarea id="composer-ta" data-draft="c|' + esc(draftKey(anchor)) + '" placeholder="Write the review comment as it should appear on GitHub"></textarea><div class="actions"><button class="btn primary small" id="composer-save">Queue comment</button><button class="btn small" id="composer-cancel">Cancel</button></div>';
     d.querySelector('#composer-save').onclick = () => { const v = d.querySelector('#composer-ta').value.trim(); if (v) createComment(anchor, v); };
-    d.querySelector('#composer-cancel').onclick = () => { openComposer = null; renderAll(); };
+    d.querySelector('#composer-cancel').onclick = () => { dropDraft('c|' + draftKey(anchor)); openComposer = null; renderAll(); };
     setTimeout(() => { const t = d.querySelector('#composer-ta'); if (t) t.focus(); }, 0);
     return d;
   }
@@ -743,7 +751,8 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     });
   }
 
-  function renderAll() { renderStepper(); renderCommit(); renderFiles(); renderQueue(); measureHead(); renderFeedback(); }
+  function renderAll() { renderStepper(); renderCommit(); renderFiles(); renderQueue(); measureHead(); renderFeedback(); restoreDrafts(); saveUi(); }
+  function closeAll() { openComposer = null; openAsk = null; editing = null; fbOpen = false; subOpen = false; renderSubmit(); renderAll(); }
   // Submitting the review is the viewer's explicit, two-click action; Claude performs it on GitHub when notified.
   let subOpen = false;
   function toggleSubmit() { subOpen = !subOpen; if (subOpen && fbOpen) { fbOpen = false; renderFeedback(); } renderSubmit(); }
@@ -768,9 +777,9 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
       if (!go.dataset.armed) { go.dataset.armed = '1'; go.textContent = 'Click again: submit as "' + label + '" (public)'; return; }
       const body = p.querySelector('#sub-body').value.trim(), withConv = !!(p.querySelector('#sub-conv') || {}).checked;
       const sent = await notifyClaude({ id: 'submit-' + Date.now().toString(36) }, 'event=' + ev + ' postConversationReplies=' + (withConv ? 'yes' : 'no') + '\n' + body, document.getElementById('submitrev'), 'submit review');
-      subOpen = false; renderSubmit(); toast(sent ? 'Sent to Claude: submitting your review' : 'Claude was not notified; tell Claude in chat to submit');
+      if (sent) dropDraft('sub-body'); subOpen = false; renderSubmit(); toast(sent ? 'Sent to Claude: submitting your review' : 'Claude was not notified; tell Claude in chat to submit');
     };
-    document.body.appendChild(p); setTimeout(() => p.querySelector('#sub-body').focus(), 0);
+    document.body.appendChild(p); restoreDrafts(); saveUi(); setTimeout(() => p.querySelector('#sub-body').focus(), 0);
   }
   // Feedback conversations with Claude live in a panel by the Feedback button, never in the diff.
   let fbOpen = false, showFbDone = false;
@@ -787,7 +796,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     const comp = askComposer({ commit: COMMITS[current].sha, commitIdx: current, kind: 'feedback' }, document.getElementById('feedback'));
     comp.querySelector('#ask-cancel').onclick = () => { fbOpen = false; renderFeedback(); };
     if (draft) comp.querySelector('#ask-ta').value = draft;
-    p.appendChild(comp); document.body.appendChild(p);
+    p.appendChild(comp); document.body.appendChild(p); restoreDrafts(); saveUi();
   }
   function measureHead() { document.documentElement.style.setProperty('--head-h', document.getElementById('top').offsetHeight + 'px'); }
   function go(i) { if (i < 0 || i >= COMMITS.length) return; current = i; cursorId = null; openComposer = null; editing = null; location.hash = 'commit-' + (i + 1); renderAll(); window.scrollTo({ top: 0 }); }
@@ -874,32 +883,36 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     const ln = rows[idx].previousElementSibling; if (ln && ln.matches && ln.matches('tr.line')) setCursor(ln, false);
     rows[idx].scrollIntoView({ block: 'center' }); flashRow(rows[idx].previousElementSibling || rows[idx]);
   }
-  // d dismisses what belongs to the selected line or comment: an answered conversation or the discussion under a comment.
-  function dismissAtCursor() {
+  // d, q and r act on the cards of the selected line or comment: dismiss a conversation, queue, toggle Reviewed by Human.
+  function cardAction(sel, none) {
     const cur = current_(); let scope = [];
     if (lastCmt) scope = [lastCmt];
     else if (cur && cur.classList.contains('gstop')) scope = [cur];
     else if (cur && cur.matches('tr.line')) { for (let n = cur.nextElementSibling; n && n.matches('tr.cmt'); n = n.nextElementSibling) scope.push(n); }
-    const b = scope.map(x => x.querySelector('[data-act="dismiss"], [data-act="hidedisc"]')).find(Boolean);
-    if (b) b.click(); else toast('Nothing to dismiss here');
+    const b = scope.map(x => x.querySelector(sel)).find(Boolean);
+    if (b) b.click(); else toast(none);
   }
   document.addEventListener('keydown', e => {
     if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { const btn = e.target.parentElement.querySelector('.btn.primary'); if (btn) btn.click(); }
-      if (e.key === 'Escape') { openComposer = null; editing = null; renderAll(); }
+      if (e.key === 'Escape') closeAll();
       return;
     }
     if (e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.key === 'Escape') { closeAll(); return; }
     if (e.key === 'Enter' && e.target.closest && e.target.closest('button, a, label')) return;
-    const act = {
+    const keys = {
       ']': () => go(current + 1), '[': () => go(current - 1), ArrowRight: () => stepComment(1), ArrowLeft: () => stepComment(-1),
       j: () => moveCursor(-1), ArrowUp: () => moveCursor(-1), l: () => moveCursor(1), ArrowDown: () => moveCursor(1),
       PageUp: () => pageCursor(-1), PageDown: () => pageCursor(1),
-      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), f: () => toggleFeedback(), F: () => toggleFeedback(), d: () => dismissAtCursor(), D: () => dismissAtCursor(), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), Enter: () => enterCursor()
-    }[e.key];
+      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), f: () => toggleFeedback(), d: () => cardAction('[data-act="dismiss"], [data-act="hidedisc"]', 'Nothing to dismiss here'), q: () => cardAction('[data-act="approve"]', 'No proposed comment to queue here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), Enter: () => enterCursor()
+    };
+    const act = keys[e.key] || (e.key.length === 1 ? keys[e.key.toLowerCase()] : null);
     if (act) { e.preventDefault(); act(); }
   });
 
+  try { const ui = JSON.parse(lsGet('ui') || 'null'); if (ui) ({ openComposer, openAsk, editing, fbOpen, subOpen } = ui); } catch (e) {}
+  if (subOpen) renderSubmit();
   const m0 = /^#commit-(\d+)$/.exec(location.hash); if (m0) { const i = parseInt(m0[1], 10) - 1; if (i >= 0 && i < COMMITS.length) current = i; }
   renderAll();
 
