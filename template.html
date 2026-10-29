@@ -223,7 +223,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     </div>
   </div>
   <div class="stepper" id="stepper" role="tablist"></div>
-  <div class="help"><kbd>[</kbd> <kbd>]</kbd> commit · <kbd>j</kbd> <kbd>l</kbd> line · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen · <kbd>n</kbd> <kbd>p</kbd> next / previous comment · <kbd>k</kbd> comment on line · <kbd>u</kbd> submit review · <kbd>f</kbd> feedback · <kbd>d</kbd> dismiss · <kbd>q</kbd> queue · <kbd>r</kbd> Reviewed by Human · <kbd>Esc</kbd> close · <kbd>h</kbd> show / hide queue · <kbd>i</kbd> ask Claude · <kbd>m</kbd> ask Claude to change · <kbd>Enter</kbd> expand / collapse · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> saves a comment</div>
+  <div class="help"><kbd>[</kbd> <kbd>]</kbd> commit · <kbd>j</kbd> <kbd>l</kbd> line · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen · <kbd>n</kbd> <kbd>p</kbd> next / previous comment · <kbd>k</kbd> comment on line · <kbd>u</kbd> submit review · <kbd>f</kbd> feedback · <kbd>d</kbd> dismiss · <kbd>q</kbd> queue · <kbd>r</kbd> Reviewed by Human · <kbd>Esc</kbd> close · <kbd>h</kbd> show / hide queue · <kbd>i</kbd> ask Claude · <kbd>m</kbd> ask Claude to change · <kbd>Enter</kbd> expand / collapse · <kbd>Enter</kbd> in a text box sends · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line</div>
 </header>
 
 <main>
@@ -949,7 +949,8 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   }
   document.addEventListener('keydown', e => {
     if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { const btn = e.target.parentElement.querySelector('.btn.primary'); if (btn) btn.click(); }
+      // Enter sends, Shift+Enter starts a new line.
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.target.tagName === 'TEXTAREA' && e.target.id !== 'sub-body') { e.preventDefault(); const btn = e.target.parentElement.querySelector('.btn.primary, [data-act="followup"]'); if (btn) btn.click(); }
       if (e.key === 'Escape') closeAll();
       return;
     }
