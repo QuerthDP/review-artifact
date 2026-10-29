@@ -777,7 +777,18 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   function toQueue() { if (region !== 'diff' || !qStops().length) return; region = 'queue'; markQ(true); }
   function toDiff() { if (region === 'commits') { region = 'diff'; markStep(); return; } if (region !== 'queue') return; region = 'diff'; markQ(false); }
   function moveQ(d) { qCur += d; markQ(true); }
-  function renderAll() { renderStepper(); renderCommit(); renderFiles(); renderQueue(); measureHead(); renderFeedback(); restoreDrafts(); saveUi(); markQ(false); markStep(); }
+  function renderAll() { renderStepper(); renderCommit(); renderFiles(); renderQueue(); measureHead(); renderFeedback(); restoreDrafts(); saveUi(); markQ(false); markStep(); restoreFocus(); }
+  // The text box being typed in keeps focus across reloads and re-renders, so keys go into it instead of firing shortcuts.
+  let focusPos = 0;
+  document.addEventListener('focusin', e => { if (e.target.tagName === 'TEXTAREA' && e.target.id) lsSet('focus', e.target.id); });
+  document.addEventListener('focusout', e => { if (e.target.tagName === 'TEXTAREA') setTimeout(() => { const a = document.activeElement; if (document.hasFocus() && (!a || a.tagName !== 'TEXTAREA')) lsSet('focus', ''); }, 0); });
+  ['input', 'keyup', 'click'].forEach(ev => document.addEventListener(ev, e => { if (e.target.tagName === 'TEXTAREA') { focusPos = e.target.selectionStart; lsSet('focuspos', String(focusPos)); } }));
+  function restoreFocus() {
+    const id = lsGet('focus'), ta = id && document.getElementById(id), a = document.activeElement;
+    if (!ta || a === ta || (a && a.tagName === 'TEXTAREA')) return;
+    const pos = Math.min(parseInt(lsGet('focuspos') || '0', 10) || 0, ta.value.length);
+    ta.focus({ preventScroll: true }); ta.setSelectionRange(pos, pos);
+  }
   function closeAll() { openComposer = null; openAsk = null; editing = null; fbOpen = false; showFbDone = false; fbCur = Infinity; subOpen = false; renderSubmit(); renderAll(); }
   // Submitting the review is the viewer's explicit, two-click action; Claude performs it on GitHub when notified.
   let subOpen = false;
