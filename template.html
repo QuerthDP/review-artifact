@@ -798,6 +798,8 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     if (keep) { p.querySelector('#sub-body').value = keep.body; const r = p.querySelector('input[value="' + keep.ev + '"]'); if (r) r.checked = true; }
     p.querySelector('.fbpanel-head button').onclick = p.querySelector('#sub-cancel').onclick = () => { subOpen = false; renderSubmit(); };
     const go = p.querySelector('#sub-go');
+    // Changing the review type asks for the confirming click again.
+    p.querySelectorAll('input[name=subev]').forEach(r => r.onchange = () => { delete go.dataset.armed; go.textContent = 'Submit review'; });
     go.onclick = async () => {
       const ev = p.querySelector('input[name=subev]:checked').value, label = { COMMENT: 'comment', APPROVE: 'approve', REQUEST_CHANGES: 'request changes' }[ev];
       if (!go.dataset.armed) { go.dataset.armed = '1'; go.textContent = 'Click again: submit as "' + label + '" (public)'; return; }
@@ -812,6 +814,10 @@ body.nopointer, body.nopointer * { cursor: none !important; }
       if (sent || !notifyErr) dropDraft('sub-body'); subOpen = false; renderSubmit(); toast(sent || !notifyErr ? 'Sent to Claude: submitting your review' : 'Claude was not notified; tell Claude in chat to submit');
     };
     document.body.appendChild(p); restoreDrafts(); saveUi(); setTimeout(() => p.querySelector('#sub-body').focus(), 0);
+  }
+  function stepReviewType(dir) {
+    const rs = Array.from(document.querySelectorAll('#sub-panel input[name=subev]')); if (!rs.length) return;
+    const i = rs.findIndex(r => r.checked), n = rs[(i + dir + rs.length) % rs.length]; n.checked = true; n.onchange();
   }
   // A status line that stays up while GitHub works; a link when done.
   function ghStatus(msg, href, ms) {
@@ -991,6 +997,9 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   document.addEventListener('keydown', e => {
     if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') {
       // Enter sends, Shift+Enter starts a new line.
+      // In the review summary Up / Down pick the review type, and Enter arms, then submits.
+      if (e.target.id === 'sub-body' && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey) { e.preventDefault(); stepReviewType(e.key === 'ArrowDown' ? 1 : -1); return; }
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.target.id === 'sub-body') { e.preventDefault(); const g = document.getElementById('sub-go'); if (g && !g.disabled) g.click(); return; }
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.target.tagName === 'TEXTAREA' && e.target.id !== 'sub-body') { e.preventDefault(); const btn = e.target.parentElement.querySelector('.btn.primary, [data-act="followup"]'); if (btn) btn.click(); }
       if (e.key === 'Escape') closeAll();
       return;
@@ -998,6 +1007,8 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     if (e.key === 'Escape') { closeAll(); return; }
     if (fbOpen && fbKey(e.key)) { e.preventDefault(); return; }
+    if (subOpen && e.key.startsWith('Arrow')) { e.preventDefault(); stepReviewType(e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : -1); return; }
+    if (subOpen && e.key === 'Enter' && !(e.target.closest && e.target.closest('button'))) { e.preventDefault(); const g = document.getElementById('sub-go'); if (g && !g.disabled) g.click(); return; }
     if (region === 'commits' && e.key.startsWith('Arrow')) { e.preventDefault(); if (e.key === 'ArrowLeft') { go(current - 1); toCommits(); } else if (e.key === 'ArrowRight') { go(current + 1); toCommits(); } else if (e.key === 'ArrowDown') fromCommits(); return; }
     if (region === 'queue' && e.key === 'Enter') { e.preventDefault(); const b = qStops()[qCur]; if (b) { if (b.classList.contains('qitem')) toDiff(); b.click(); } return; }
     if (e.key === 'Enter' && e.target.closest && e.target.closest('button, a, label')) return;
