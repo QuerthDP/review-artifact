@@ -935,6 +935,8 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     const btns = cur.querySelectorAll(sel); const b = Array.from(btns).find(x => x.dataset.side === 'RIGHT') || btns[btns.length - 1]; if (b) b.click();
   }
   function enterCursor() {
+    // After n / p the highlighted comment, not the line above it, is what Enter replies to.
+    if (lastCmt) { const card = lastCmt.matches('.card, .chat, .ghthread') ? lastCmt : lastCmt.querySelector('.thread > .card, .thread > .chat, .thread > .ghthread'); if (card) { enterCard(card); return; } }
     const cur = current_(); if (!cur) return;
     if (cur.parentElement && cur.parentElement.classList.contains('thread')) { enterCard(cur); return; }
     if (cur.classList.contains('gstop')) { if (cur.tagName === 'DETAILS') cur.open = !cur.open; else lineAction('.addbtn'); }
