@@ -178,6 +178,9 @@ tr.line:hover td.code { filter: brightness(.96); }
 .msg-row .body { flex: 1; min-width: 0; background: var(--bg); border-radius: 6px; padding: 5px 8px; }
 .msg-row.claude .body { background: var(--posted-soft); }
 .chat .pending { font-size: 12px; color: var(--muted); font-style: italic; }
+/* Pulsing dots while a reply from Claude is pending; static under reduced motion. */
+.pending .dots i { font-style: normal; }
+@media (prefers-reduced-motion: no-preference) { .pending .dots i { animation: waitdot 1.4s ease-in-out infinite; } .pending .dots i:nth-child(2) { animation-delay: .2s; } .pending .dots i:nth-child(3) { animation-delay: .4s; } @keyframes waitdot { 0%, 80%, 100% { opacity: .2; } 40% { opacity: 1; } } }
 .chat .followup { display: flex; gap: 6px; align-items: flex-end; }
 .chat .followup textarea { min-height: 38px; flex: 1; }
 tr.cmt td { padding: 0 !important; white-space: normal; font-family: var(--ui); font-size: 13px; background: var(--bg); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
@@ -352,7 +355,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   function threadCard(t, el) {
     const d = document.createElement('div'); d.className = 'chat'; d.id = 'chs-' + t.id;
     const msgs = (t.messages || []).map(m => '<div class="msg-row ' + m.role + '"><span class="who">' + (m.role === 'claude' ? 'Claude' : 'You') + '</span><div class="body">' + md(m.text) + '</div></div>').join('');
-    const pending = t.status === 'asked' ? '<div class="pending">Waiting for Claude' + (t.shellThreadId || !t.notifyError ? '' : ' (not notified: tell Claude in chat to answer page questions)') + '</div>' : '';
+    const pending = t.status === 'asked' ? '<div class="pending">Waiting for Claude' + WAIT_DOTS + (t.shellThreadId || !t.notifyError ? '' : ' (not notified: tell Claude in chat to answer page questions)') + '</div>' : '';
     d.innerHTML = '<div class="card-head"><b>' + (t.kind === 'modify' ? 'Change request to Claude' : t.kind === 'feedback' ? 'Feedback on the tool' : 'Conversation with Claude') + '</b>' + (t.path ? '' : '<span>commit-level</span>') + (t.dismissed ? '<span class="pill rejected">dismissed</span><button class="btn small dismiss" data-act="restore">Restore</button>' : t.status === 'answered' ? '<button class="btn small dismiss" data-act="dismiss" title="Hide this answered conversation; it can be restored from the queue">Dismiss</button>' : '') + '</div>' + msgs + pending + (t.commentId && comments[t.commentId] ? '<div class="made"><button class="btn small" data-act="gocomment">Go to the comment Claude drafted</button></div>' : '') + '<div class="followup"><textarea id="fu-' + t.id + '" placeholder="Follow up"></textarea><button class="btn small ask" data-act="followup">Send</button></div>';
     const gc = d.querySelector('[data-act="gocomment"]'); if (gc) gc.onclick = () => { const el = document.getElementById('cds-' + t.commentId); if (el) { setCursor(el, false); el.scrollIntoView({ block: 'center' }); flashRow(el); } };
     d.querySelector('[data-act="followup"]').onclick = () => { const ta = d.querySelector('#fu-' + t.id); const v = ta.value.trim(); if (v) sendFollowUp(t, v, el); };
@@ -513,7 +516,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
       const disc = c.discussion || [];
       const legacy = c.status === 'revise' && c.note && !disc.some(m => m.role === 'user' && m.text === c.note) ? [{ role: 'user', text: c.note }] : [];
       const msgs = disc.concat(legacy).map(m => '<div class="msg-row ' + m.role + '"><span class="who">' + (m.role === 'claude' ? 'Claude' : 'You') + '</span><div class="body">' + md(m.text) + '</div></div>').join('');
-      const wait = c.status === 'revise' ? '<div class="pending">Waiting for Claude' + (c.shellThreadId || !c.notifyError ? '' : ' (not notified: tell Claude in chat to pick up revision requests)') + '</div>' : '';
+      const wait = c.status === 'revise' ? '<div class="pending">Waiting for Claude' + WAIT_DOTS + (c.shellThreadId || !c.notifyError ? '' : ' (not notified: tell Claude in chat to pick up revision requests)') + '</div>' : '';
       // The conversation with Claude under a comment can be dismissed once it is settled; a new request shows it again.
       const hideBtn = msgs && !wait ? '<button class="btn small dismiss" data-act="hidedisc" title="Hide this conversation with Claude">Dismiss conversation</button>' : '';
       const note = c.discussionHidden && msgs && !wait ? '<div class="discussion"><button class="btn small" data-act="showdisc">Show conversation with Claude (' + (disc.length + legacy.length) + ')</button></div>' : msgs || wait ? '<div class="discussion">' + msgs + wait + hideBtn + '</div>' : '';
@@ -892,6 +895,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   document.getElementById('mode').onclick = () => { viewMode = viewMode === 'split' ? 'unified' : 'split'; lsSet('viewmode', viewMode); renderMode(); renderFiles(); };
   renderMode();
   // Feedback on the tool goes to Claude, which writes it up as an issue on the tool's repo.
+  const WAIT_DOTS = '<span class="dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span>';
   const FEEDBACK_REPO = 'QuerthDP/review-artifact';
   function toggleFeedback(e) {
     if (fbOpen) { closeFeedback(); return; }
