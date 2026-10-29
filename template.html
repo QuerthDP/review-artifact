@@ -96,6 +96,7 @@ header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 .ghbody { overflow-wrap: anywhere; } .ghbody img { max-width: 100%; height: auto; vertical-align: middle; } .ghbody pre { overflow-x: auto; } .ghbody details { margin: 4px 0; }
 .fbpanel { position: fixed; right: 16px; top: calc(var(--head-h, 60px) + 8px); width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - var(--head-h, 60px) - 24px); overflow: auto; z-index: 45; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.18); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .fbpanel-head { display: flex; align-items: center; justify-content: space-between; }
+.chat .card-head .dismiss { margin-left: auto; }
 .fbmenu { position: fixed; z-index: 50; display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 30px rgba(0,0,0,.18); }
 .discussion .pending { font-size: 12px; color: var(--muted); font-style: italic; }
 .discussion { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; border-top: 1px dashed var(--line, #ccc); padding-top: 8px; }
@@ -273,7 +274,9 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
   let openAsk = null;          // {commit, commitIdx, path, line, side} for the in-page "Ask Claude" composer
   let sending = false;
 
-  function threadsAt(sha, path, refs) { return Object.values(threads).filter(t => t.kind !== 'feedback' && t.commit === sha && t.path === path && (!refs || refs.some(r => t.line === r.line && (t.side || 'RIGHT') === r.side))); }
+  let showDismissed = lsGet('showdismissed') === '1'; // answered conversations the viewer dismissed stay hidden unless asked for
+  const visibleThread = t => showDismissed || !t.dismissed;
+  function threadsAt(sha, path, refs) { return Object.values(threads).filter(t => visibleThread(t) && t.kind !== 'feedback' && t.commit === sha && t.path === path && (!refs || refs.some(r => t.line === r.line && (t.side || 'RIGHT') === r.side))); }
   async function writeThread(id, data, isNew) {
     if (!db) { toast('Store unavailable'); return false; }
     try { if (isNew) await db.collection('threads').doc(id).set(data); else await db.collection('threads').doc(id).update(data); return true; }
@@ -308,7 +311,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     if (sending) return; sending = true;
     const shellThreadId = await notifyClaude(t, text, el);
     const messages = (t.messages || []).concat([{ role: 'user', text, at: new Date().toISOString() }]);
-    const ok = await writeThread(t.id, { messages, status: 'asked', shellThreadId: shellThreadId || t.shellThreadId || null, updatedAt: new Date().toISOString() }, false);
+    const ok = await writeThread(t.id, { messages, status: 'asked', dismissed: false, shellThreadId: shellThreadId || t.shellThreadId || null, updatedAt: new Date().toISOString() }, false);
     sending = false;
     if (ok) toast(shellThreadId ? 'Sent to Claude' : 'Follow-up saved');
   }
@@ -328,8 +331,10 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     const d = document.createElement('div'); d.className = 'chat';
     const msgs = (t.messages || []).map(m => '<div class="msg-row ' + m.role + '"><span class="who">' + (m.role === 'claude' ? 'Claude' : 'You') + '</span><div class="body">' + md(m.text) + '</div></div>').join('');
     const pending = t.status === 'asked' ? '<div class="pending">Waiting for Claude' + (t.shellThreadId ? '' : ' (not notified: tell Claude in chat to answer page questions)') + '</div>' : '';
-    d.innerHTML = '<div class="card-head"><b>' + (t.kind === 'modify' ? 'Change request to Claude' : t.kind === 'feedback' ? 'Feedback on the tool' : 'Conversation with Claude') + '</b>' + (t.path ? '' : '<span>commit-level</span>') + '</div>' + msgs + pending + '<div class="followup"><textarea id="fu-' + t.id + '" placeholder="Follow up"></textarea><button class="btn small ask" data-act="followup">Send</button></div>';
+    d.innerHTML = '<div class="card-head"><b>' + (t.kind === 'modify' ? 'Change request to Claude' : t.kind === 'feedback' ? 'Feedback on the tool' : 'Conversation with Claude') + '</b>' + (t.path ? '' : '<span>commit-level</span>') + (t.dismissed ? '<span class="pill rejected">dismissed</span><button class="btn small dismiss" data-act="restore">Restore</button>' : t.status === 'answered' ? '<button class="btn small dismiss" data-act="dismiss" title="Hide this answered conversation; it can be restored from the queue">Dismiss</button>' : '') + '</div>' + msgs + pending + '<div class="followup"><textarea id="fu-' + t.id + '" placeholder="Follow up"></textarea><button class="btn small ask" data-act="followup">Send</button></div>';
     d.querySelector('[data-act="followup"]').onclick = () => { const ta = d.querySelector('#fu-' + t.id); const v = ta.value.trim(); if (v) sendFollowUp(t, v, el); };
+    const dm = d.querySelector('[data-act="dismiss"], [data-act="restore"]');
+    if (dm) dm.onclick = () => writeThread(t.id, { dismissed: dm.dataset.act === 'dismiss', updatedAt: new Date().toISOString() }, false);
     return d;
   }
   function askAbout(anchor) { openAsk = anchor; openComposer = null; editing = null; renderAll(); setTimeout(() => { const t = document.getElementById('ask-ta'); if (t) t.scrollIntoView({ block: 'center' }); }, 0); }
@@ -672,11 +677,16 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     const el = document.getElementById('queue'); el.innerHTML = '<h2>Review queue</h2>';
     const all = Object.values(comments).sort((a, b) => (a.commit === b.commit ? 0 : COMMITS.findIndex(c => c.sha === a.commit) - COMMITS.findIndex(c => c.sha === b.commit)) || (a.path || '').localeCompare(b.path || '') || (a.line || 0) - (b.line || 0));
     if (!all.length && !Object.keys(threads).length) { el.innerHTML += '<div class="empty">' + (dbReady ? 'No comments yet. Hover a diff line and press + to add one.' : 'Loading comments…') + '</div>'; return; }
-    const convs = Object.values(threads);
-    if (convs.length) {
+    const allConvs = Object.values(threads), hiddenN = allConvs.filter(t => t.dismissed).length;
+    const convs = allConvs.filter(visibleThread);
+    if (allConvs.length) {
       const g = document.createElement('div'); g.className = 'qgroup';
       const open = convs.filter(t => t.status === 'asked').length;
       g.innerHTML = '<h3><span class="pill revise">' + convs.length + '</span>Conversations with Claude' + (open ? ' · ' + open + ' waiting' : '') + '</h3>';
+      if (hiddenN) {
+        const tg = document.createElement('button'); tg.className = 'btn small'; tg.textContent = showDismissed ? 'Hide dismissed' : 'Show ' + hiddenN + ' dismissed';
+        tg.onclick = () => { showDismissed = !showDismissed; lsSet('showdismissed', showDismissed ? '1' : '0'); renderAll(); }; g.appendChild(tg);
+      }
       convs.forEach(t => {
         const ci = COMMITS.findIndex(c => c.sha === t.commit); const first = (t.messages && t.messages[0] && t.messages[0].text) || '';
         const b = document.createElement('button'); b.className = 'qitem';
@@ -710,7 +720,7 @@ aside.queue h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; le
     const p = document.createElement('div'); p.id = 'fb-panel'; p.className = 'fbpanel';
     p.innerHTML = '<div class="fbpanel-head"><b>Feedback on the review tool</b><button class="btn small" aria-label="Close feedback">✕</button></div>';
     p.querySelector('.fbpanel-head button').onclick = () => { fbOpen = false; renderFeedback(); };
-    Object.values(threads).filter(t => t.kind === 'feedback').sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')).forEach(t => p.appendChild(threadCard(t, document.getElementById('feedback'))));
+    Object.values(threads).filter(t => t.kind === 'feedback' && visibleThread(t)).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')).forEach(t => p.appendChild(threadCard(t, document.getElementById('feedback'))));
     const comp = askComposer({ commit: COMMITS[current].sha, commitIdx: current, kind: 'feedback' }, document.getElementById('feedback'));
     comp.querySelector('#ask-cancel').onclick = () => { fbOpen = false; renderFeedback(); };
     if (draft) comp.querySelector('#ask-ta').value = draft;
