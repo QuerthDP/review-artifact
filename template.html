@@ -220,6 +220,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
       <button class="btn small" id="queuetoggle" aria-label="Show or hide the review queue">Hide queue</button>
       <button class="btn small primary" id="submitrev" aria-label="Submit your GitHub review">Submit review</button>
       <button class="btn small" id="feedback" aria-label="Send feedback about this review tool">Feedback</button>
+      <button class="btn small" id="askreview" aria-label="Ask Claude to review the whole PR">Ask Claude to review</button>
       <button class="btn small" id="prev" aria-label="Previous commit">‹ Prev</button>
       <button class="btn small" id="next" aria-label="Next commit">Next ›</button>
     </div>
@@ -824,7 +825,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
       const sent = await notifyClaude({ id: 'submit-' + Date.now().toString(36) }, 'event=' + ev + ' postConversationReplies=' + (withConv ? 'yes' : 'no') + '\n' + body, document.getElementById('submitrev'), 'submit review');
       if (sent || !notifyErr) dropDraft('sub-body'); subOpen = false; renderSubmit(); toast(sent || !notifyErr ? 'Sent to Claude: submitting your review' : 'Claude was not notified; tell Claude in chat to submit');
     };
-    document.body.appendChild(p); restoreDrafts(); saveUi(); setTimeout(() => p.querySelector('#sub-body').focus(), 0);
+    document.body.appendChild(p); placePanels(); restoreDrafts(); saveUi(); setTimeout(() => p.querySelector('#sub-body').focus(), 0);
   }
   function stepReviewType(dir) {
     const rs = Array.from(document.querySelectorAll('#sub-panel input[name=subev]')); if (!rs.length) return;
@@ -863,7 +864,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     const comp = askComposer({ commit: COMMITS[current].sha, commitIdx: current, kind: 'feedback' }, document.getElementById('feedback'));
     comp.querySelector('#ask-cancel').onclick = closeFeedback; comp.classList.add('fbstop');
     if (draft) comp.querySelector('#ask-ta').value = draft;
-    p.appendChild(comp); document.body.appendChild(p); restoreDrafts(); saveUi(); markFb(false);
+    p.appendChild(comp); document.body.appendChild(p); placePanels(); restoreDrafts(); saveUi(); markFb(false);
   }
   // Closing the panel always folds the resolved feedback away again.
   function closeFeedback() { fbOpen = false; showFbDone = false; fbCur = Infinity; renderFeedback(); }
@@ -881,6 +882,8 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     if (k === 'Enter') { const el = st[fbCur]; if (!el) return false; if (el.tagName === 'BUTTON') el.click(); else { const ta = el.querySelector('textarea'); if (ta) ta.focus(); } return true; }
     return false;
   }
+  // Header panels open just under the button that opened them, not below the whole header.
+  function placePanels() { [['fb-panel', 'feedback'], ['sub-panel', 'submitrev']].forEach(([pid, bid]) => { const p = document.getElementById(pid), b = document.getElementById(bid); if (!p || !b) return; const top = Math.max(8, Math.round(b.getBoundingClientRect().bottom + 6)); p.style.top = top + 'px'; p.style.maxHeight = 'calc(100vh - ' + (top + 16) + 'px)'; }); }
   function measureHead() { document.documentElement.style.setProperty('--head-h', document.getElementById('top').offsetHeight + 'px'); }
   function go(i) { if (i < 0 || i >= COMMITS.length) return; current = i; cursorId = null; openComposer = null; editing = null; location.hash = 'commit-' + (i + 1); renderAll(); window.scrollTo({ top: 0 }); }
   function fromHash() { const m = /^#commit-(\d+)$/.exec(location.hash); const i = m ? parseInt(m[1], 10) - 1 : 0; if (i >= 0 && i < COMMITS.length && i !== current) { current = i; openComposer = null; editing = null; renderAll(); } }
@@ -898,13 +901,22 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     if (e && e.type === 'click') setTimeout(() => { const ta = document.querySelector('#fb-panel #ask-ta'); if (ta) ta.focus(); }, 0);
   }
   document.getElementById('feedback').onclick = toggleFeedback;
+  // A fresh Claude review of the whole PR: the first click arms, the second sends; its findings arrive as proposed comments.
+  document.getElementById('askreview').onclick = async () => {
+    const b = document.getElementById('askreview');
+    if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Click again: review the PR'; setTimeout(() => { if (b.dataset.armed === '1') { delete b.dataset.armed; b.textContent = 'Ask Claude to review'; } }, 5000); return; }
+    b.dataset.armed = 'sent'; b.disabled = true; b.textContent = 'Review requested';
+    const sent = await notifyClaude({ id: 'rev-' + Date.now().toString(36) }, 'scope=pr viewing commit ' + (current + 1) + '/' + COMMITS.length, b, 'review request');
+    if (sent || !notifyErr) toast('Claude is reviewing the PR; its comments will appear as proposals');
+    else { delete b.dataset.armed; b.disabled = false; b.textContent = 'Ask Claude to review'; }
+  };
   function renderQueueToggle() { const hidden = lsGet('queuehidden') === '1'; document.body.classList.toggle('queue-hidden', hidden); document.getElementById('queuetoggle').textContent = hidden ? 'Show queue' : 'Hide queue'; }
   document.getElementById('queuetoggle').onclick = () => { lsSet('queuehidden', lsGet('queuehidden') === '1' ? '0' : '1'); renderQueueToggle(); measureHead(); };
   renderQueueToggle();
   document.getElementById('prev').onclick = () => go(current - 1);
   document.getElementById('next').onclick = () => go(current + 1);
   window.addEventListener('hashchange', fromHash);
-  window.addEventListener('resize', measureHead);
+  window.addEventListener('resize', () => { measureHead(); placePanels(); });
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(measureHead);
   if (window.ResizeObserver) new ResizeObserver(measureHead).observe(document.getElementById('top'));
   function flashRow(t) { if (!t.classList) return; t.classList.remove('flash'); void t.offsetWidth; t.classList.add('flash'); }
