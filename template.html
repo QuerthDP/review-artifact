@@ -1024,7 +1024,13 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     const all = Array.from(a.closest('.file').querySelectorAll('tr.line')), i = all.indexOf(a), k = all.indexOf(b);
     return all.slice(Math.min(i, k), Math.max(i, k) + 1);
   }
-  function markSel() { document.querySelectorAll('tr.line.sel').forEach(x => x.classList.remove('sel', 'sel-first', 'sel-last')); const r = selRows() || []; r.forEach(x => x.classList.add('sel')); if (r.length) { r[0].classList.add('sel-first'); r[r.length - 1].classList.add('sel-last'); } }
+  // An open composer or question on a range keeps it framed until it is sent or closed.
+  function openRangeRows() {
+    const a = [openComposer, openAsk].find(x => x && x.startLine && x.path && x.commitIdx === current); if (!a) return null;
+    const rows = []; for (let n = a.startLine; n <= a.line; n++) { const tr = document.querySelector('[data-ids~="' + rowId(current, a.path, n, a.side || 'RIGHT') + '"]'); if (tr && rows.indexOf(tr) < 0) rows.push(tr); }
+    return rows.length ? rows : null;
+  }
+  function markSel() { document.querySelectorAll('tr.line.sel').forEach(x => x.classList.remove('sel', 'sel-first', 'sel-last')); const r = selRows() || openRangeRows() || []; r.forEach(x => x.classList.add('sel')); if (r.length) { r[0].classList.add('sel-first'); r[r.length - 1].classList.add('sel-last'); } }
   function clearSel() { selFrom = null; markSel(); }
   function extendSel(dir) {
     const cur = lineOf(current_()); if (!selFrom && cur && cur.matches('tr.line')) selFrom = cur.id;
