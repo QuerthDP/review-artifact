@@ -10,6 +10,7 @@ for sha in git("rev-list", "--reverse", f"{base}..{head}").split():
         if line.startswith("diff --git"):
             m = re.match(r"diff --git a/(.*) b/(.*)", line); cur = {"path": m.group(2), "hunks": [], "add": 0, "del": 0, "status": "M"}; files.append(cur); hunk = None
         elif cur and line.startswith("new file"): cur["status"] = "A"
+# scratch change in the middle
         elif cur and line.startswith("deleted file"): cur["status"] = "D"
         elif cur and line.startswith("@@"):
             m = re.match(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)", line)
