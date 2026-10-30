@@ -43,7 +43,7 @@ if c.get('githubCommentId'):
     ns = gql('query{node(id:"%s"){...on PullRequestReview{comments(first:100){nodes{id databaseId}}}}}' % REVIEW)['node']['comments']['nodes']
     node = next((n['id'] for n in ns if n['databaseId'] == c['githubCommentId']), None)
 if want and node:
-    gql('mutation($i:ID!,$b:String!){updatePullRequestReviewComment(input:{pullRequestReviewCommentId:$i,body:$b}){clientMutationId}}', i=node, b=body_of(c)); print('updated', file=sys.stderr)
+    gql('mutation($i:ID!,$b:String!){updatePullRequestReviewComment(input:{pullRequestReviewCommentId:$i,body:$b}){clientMutationId}}', i=node, b=c.get('githubQuote', '') + body_of(c)); print('updated', file=sys.stderr)
 elif want and c.get('replyTo'):  # reply into another reviewer's thread, inside the pending review
     q = 'mutation($t:ID!,$r:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,pullRequestReviewId:$r,body:$b}){comment{databaseId}}}'
     cm = gql(q, t=c['replyTo'], r=REVIEW, b=body_of(c))['addPullRequestReviewThreadReply']['comment']
@@ -57,11 +57,12 @@ elif want:
     th = gql(q, **v)['addPullRequestReviewThread']['thread']
     if not th and line:  # GitHub refuses lines outside the PR's diff (expanded context): fall back to a file-level comment quoting the line.
         code = git('show', HEAD + ':' + path).splitlines()[line - 1].strip()
-        v = dict(r=REVIEW, p=path, b='Line ' + str(line) + ': `' + code + '`\n\n' + body_of(c), t='FILE'); line = None
+        quote = 'Line ' + str(line) + ': `' + code + '`\n\n'; upd['githubQuote'] = quote  # kept so later edits keep the quote
+        v = dict(r=REVIEW, p=path, b=quote + body_of(c), t='FILE'); line = None
         th = gql(q, **v)['addPullRequestReviewThread']['thread']
     if not th: raise SystemExit('GitHub did not create the review thread')
     upd.update(inDraft=True, githubThreadId=th['id'], githubCommentId=th['comments']['nodes'][0]['databaseId'], githubPath=path); print('added', line, file=sys.stderr)
 elif node:
     gql('mutation($i:ID!){deletePullRequestReviewComment(input:{id:$i}){clientMutationId}}', i=node); print('removed', file=sys.stderr)
-    upd.update(inDraft={'__delete__': True}, githubThreadId={'__delete__': True}, githubCommentId={'__delete__': True}, githubPath={'__delete__': True})
+    upd.update(githubQuote={'__delete__': True}, inDraft={'__delete__': True}, githubThreadId={'__delete__': True}, githubCommentId={'__delete__': True}, githubPath={'__delete__': True})
 print(json.dumps(upd))
