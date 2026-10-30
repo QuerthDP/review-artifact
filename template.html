@@ -980,7 +980,9 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   }
   function pageCursor(dir) {
     const cur = current_(); const y = cur ? cur.getBoundingClientRect().top : 160;
-    window.scrollBy(0, dir * window.innerHeight * 0.85); lastCmt = null;
+    // Step by the area left under the sticky page and file headers, keeping two lines of overlap, so no line is skipped.
+    const fh = document.querySelector('#files .file-head'), cover = document.getElementById('top').offsetHeight + (fh ? fh.offsetHeight : 0);
+    window.scrollBy(0, dir * Math.max(120, window.innerHeight - cover - 44)); lastCmt = null;
     const list = stops(); if (list.length) setCursor(nearestStop(list, Math.max(160, Math.min(y, window.innerHeight - 80))), false);
   }
   function lineAction(sel) {
