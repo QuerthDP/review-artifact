@@ -469,13 +469,20 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     const ok = await write(id, { body, status: 'queued', editedByUser: true, syncPending: true, updatedAt: new Date().toISOString() }, false);
     if (ok) { dropDraft('ta-' + id); editing = null; toast('Edited; updating your GitHub draft'); syncGitHub(comments[id] || { id }, 'edited by you'); }
   }
+  // Close the box as soon as a note is sent and ignore repeats while it is in flight, so one press sends it once.
+  const notesInFlight = new Set();
   async function sendNote(id, note, el) {
-    const c = comments[id]; if (!c) return;
+    const c = comments[id]; if (!c || notesInFlight.has(id)) return;
+    notesInFlight.add(id); const was = editing; editing = null; renderAll();
+    try { await sendNoteNow(c, id, note, el, was); } finally { notesInFlight.delete(id); }
+  }
+  async function sendNoteNow(c, id, note, el, was) {
     const shellThreadId = await notifyClaude(c, note, el, 'revision request');
     const at = new Date().toISOString();
     const discussion = (c.discussion || []).concat([{ role: 'user', text: note, at }]);
     const ok = await write(id, { status: 'revise', discussionHidden: false, note, prevStatus: c.status, noteAt: at, discussion, shellThreadId: shellThreadId || c.shellThreadId || null, notifyError: shellThreadId || c.shellThreadId ? null : notifyErr }, false);
-    if (ok) { dropDraft('ta-' + id); editing = null; toast(shellThreadId || !notifyErr ? 'Sent to Claude' : 'Saved; Claude not notified'); }
+    if (ok) { dropDraft('ta-' + id); toast(shellThreadId || !notifyErr ? 'Sent to Claude' : 'Saved; Claude not notified'); }
+    else { editing = was; renderAll(); }  // the unsent note is still in the box's saved draft
   }
   async function createComment(anchor, body) {
     const id = newId();
