@@ -150,10 +150,7 @@ tr.line:hover .lbtns { display: flex; }
 .addbtn { background: var(--accent); color: var(--accent-fg); font-size: 13px !important; }
 .askbtn { background: var(--posted); color: var(--panel); }
 .modbtn { background: var(--proposed); color: var(--panel); }
-/* Lines picked with Shift for one multi-line comment or request. */
-tr.line.sel td.num { box-shadow: inset 3px 0 0 var(--posted); }
-tr.line.sel td.code { filter: brightness(.92); }
-:root[data-theme="dark"] tr.line.sel td.code { filter: brightness(1.25); }
+
 td.code { padding-left: 12px !important; padding-right: 16px !important; tab-size: 4; }
 td.code.a, td.num.a { background: var(--add-bg); } td.num.a { background: var(--add-num); }
 td.code.d, td.num.d { background: var(--del-bg); } td.num.d { background: var(--del-num); }
@@ -166,6 +163,14 @@ tr.kcur td { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accen
 tr.kcur td:first-child { box-shadow: inset 3px 0 0 var(--accent), inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
 .file-head.kcur { box-shadow: inset 0 0 0 2px var(--accent); }
 .gstop.kcur, .thread > .kcur { box-shadow: 0 0 0 2px var(--accent); border-radius: 8px; }
+/* Lines picked with Shift: the cursor's outline, stretched from the first selected line to the last. */
+tr.line.sel td, tr.line.sel.kcur td { box-shadow: none; }
+tr.line.sel td:first-child, tr.line.sel.kcur td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+tr.line.sel.sel-first td { box-shadow: inset 0 2px 0 var(--accent); }
+tr.line.sel.sel-last td { box-shadow: inset 0 -2px 0 var(--accent); }
+tr.line.sel.sel-first.sel-last td { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+tr.line.sel.sel-first td:first-child { box-shadow: inset 3px 0 0 var(--accent), inset 0 2px 0 var(--accent); }
+tr.line.sel.sel-last td:first-child { box-shadow: inset 3px 0 0 var(--accent), inset 0 -2px 0 var(--accent); }
 #stepper .step.qcur { outline: 2px solid var(--accent); outline-offset: 1px; }
 .xbtns { display: inline-flex; gap: 4px; margin-right: 8px; vertical-align: middle; }
 .xbtn { border: 1px solid var(--line); background: var(--panel); color: var(--accent, var(--fg)); border-radius: 4px; padding: 0 6px; font: inherit; font-size: 11px; cursor: pointer; line-height: 18px; }
@@ -999,7 +1004,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     const all = Array.from(a.closest('.file').querySelectorAll('tr.line')), i = all.indexOf(a), k = all.indexOf(b);
     return all.slice(Math.min(i, k), Math.max(i, k) + 1);
   }
-  function markSel() { document.querySelectorAll('tr.line.sel').forEach(x => x.classList.remove('sel')); (selRows() || []).forEach(x => x.classList.add('sel')); }
+  function markSel() { document.querySelectorAll('tr.line.sel').forEach(x => x.classList.remove('sel', 'sel-first', 'sel-last')); const r = selRows() || []; r.forEach(x => x.classList.add('sel')); if (r.length) { r[0].classList.add('sel-first'); r[r.length - 1].classList.add('sel-last'); } }
   function clearSel() { selFrom = null; markSel(); }
   function extendSel(dir) {
     const cur = lineOf(current_()); if (!selFrom && cur && cur.matches('tr.line')) selFrom = cur.id;
