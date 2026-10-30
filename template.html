@@ -1049,6 +1049,12 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     if (cur && cur.classList.contains('gstop')) { const b = document.querySelector(sel === '.askbtn' ? '#commit [data-i]' : sel === '.addbtn' ? '#commit [data-k]' : null); if (b) b.click(); else toast('Not available at commit level'); return; }
     if (!cur || !cur.matches('tr.line')) { toast('Select a line first (j / l)'); return; }
     const rows = selRows(), row = rows ? rows[rows.length - 1] : cur;
+    // i continues the conversation already open on this line (the selected one, else the latest) instead of starting another.
+    if (sel === '.askbtn' && !rows) {
+      const here = current_(), cmt = row.nextElementSibling;
+      const chat = here && here.classList.contains('chat') ? here : cmt && cmt.classList.contains('cmt') ? Array.from(cmt.querySelectorAll('.thread > .chat')).filter(c => !c.querySelector('[data-act="restore"]')).pop() : null;
+      const ta = chat && chat.querySelector('.followup textarea'); if (ta) { ta.scrollIntoView({ block: 'center' }); ta.focus(); return; }
+    }
     const btns = row.querySelectorAll(sel); const b = Array.from(btns).find(x => x.dataset.side === 'RIGHT') || btns[btns.length - 1]; if (b) b.click();
   }
   function enterCursor() {
