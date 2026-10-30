@@ -331,6 +331,8 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     if (!cm) { notifyErr = 'not_granted'; return null; }
     try {
       if (t.shellThreadId) { await cm.sendToClaude({ threadId: t.shellThreadId, text }); return t.shellThreadId; }
+      // A re-render (a revision note closes its box first) can detach el; anchor to the card or thread that replaced it.
+      if (!el || !el.isConnected) el = document.getElementById('cds-' + t.id) || document.getElementById('commit');
       const anchor = await cm.anchorFor(el);
       const r = await cm.sendToClaude({ anchor, text: '[' + (kind || 'page question') + ' ' + t.id + '] ' + text + whereText(t, el) });
       return r.threadId;
