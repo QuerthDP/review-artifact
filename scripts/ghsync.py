@@ -49,11 +49,13 @@ elif want and c.get('replyTo'):  # reply into another reviewer's thread, inside 
     cm = gql(q, t=c['replyTo'], r=REVIEW, b=body_of(c))['addPullRequestReviewThreadReply']['comment']
     upd.update(inDraft=True, githubThreadId=c['replyTo'], githubCommentId=cm['databaseId']); print('replied', file=sys.stderr)
 elif want:
-    q = 'mutation($r:ID!,$p:String!,$b:String!,$l:Int,$s:DiffSide,$t:PullRequestReviewThreadSubjectType){addPullRequestReviewThread(input:{pullRequestReviewId:$r,path:$p,body:$b,line:$l,side:$s,subjectType:$t}){thread{id comments(first:1){nodes{databaseId}}}}}'
+    q = 'mutation($r:ID!,$p:String!,$b:String!,$l:Int,$s:DiffSide,$sl:Int,$ss:DiffSide,$t:PullRequestReviewThreadSubjectType){addPullRequestReviewThread(input:{pullRequestReviewId:$r,path:$p,body:$b,line:$l,side:$s,startLine:$sl,startSide:$ss,subjectType:$t}){thread{id comments(first:1){nodes{databaseId}}}}}'
     line = map_line(c['commit'], c['path'], c['line']) if c.get('path') and c.get('line') and (c.get('side') or 'RIGHT') == 'RIGHT' else None
     path = c.get('path') or MAIN[c['commit'][:7]]
     v = dict(r=REVIEW, p=path, b=body_of(c), t='LINE' if line else 'FILE')
     if line: v.update(l=line, s='RIGHT')
+    start = map_line(c['commit'], c['path'], c['startLine']) if line and c.get('startLine') else None
+    if start and start < line: v.update(sl=start, ss='RIGHT')  # multi-line comment
     th = gql(q, **v)['addPullRequestReviewThread']['thread']
     if not th and line:  # GitHub refuses lines outside the PR's diff (expanded context): fall back to a file-level comment quoting the line.
         code = git('show', HEAD + ':' + path).splitlines()[line - 1].strip()
