@@ -14,9 +14,13 @@ A [Claude Code](https://claude.com/claude-code) skill that turns a GitHub pull r
 
 ```sh
 git clone https://github.com/QuerthDP/review-artifact ~/.claude/skills/review-artifact
+ln -s review-artifact/local ~/.claude/skills/review-artifact-local
 ```
 
-Then, in a Claude Code session inside a clone of the repository under review:
+The clone gives two skills:
+
+- `/review-artifact <PR>` starts a persistent claude.ai/code cloud session (a routine) that builds the page and keeps answering it, so your machine does not have to stay on. `--adopt <artifact url>` hands an existing page over to the cloud. The cloud session reaches GitHub over REST only, through the repositories attached to it.
+- `/review-artifact-local <PR>` does the same in your current session; run it inside a clone of the repository under review.
 
 ```
 /review-artifact https://github.com/<owner>/<repo>/pull/<N>
