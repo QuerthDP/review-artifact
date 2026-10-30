@@ -21,7 +21,7 @@ Files in this skill dir: `template.html` (the page), `scripts/mkdiff.py`, `scrip
 
 ## 2. Seed Claude's review
 
-Review commit by commit (correctness first; verify claims by running code where possible). Write findings to `$S/findings.json` — `[{"commit": "<short>", "path": "<file>"|null, "snippet": "<exact text on the line>"|null, "side": "RIGHT", "body": "..."}]` (path null = commit-level; snippet null = file-level). Bodies: **2–3 sentences, concise**, problem then suggestion; no headings.
+Review commit by commit (correctness first; verify claims by running code where possible). Write findings to `$S/findings.json` — `[{"commit": "<short>", "path": "<file>"|null, "snippet": "<exact text on the line>"|null, "side": "RIGHT", "body": "..."}]` (path null = commit-level; snippet null = file-level). Bodies: **2–3 sentences, concise**, problem then suggestion; no headings; never cite line numbers (the comment sits on its line; name the code instead). Revisions keep these rules.
 
 `python3 -I scripts/seeds.py $S/diff.json $S/findings.json $S/writes.json`, then one `ArtifactData` `batch` with those writes. Never hardcode comments into the HTML.
 
