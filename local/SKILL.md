@@ -7,7 +7,7 @@ description: Build an interactive per-commit review page (claude.ai Artifact) fo
 
 Argument: a PR URL or `owner/repo#N` (or `N` in the current repo). The page is the review workspace: the user reads commits, asks Claude questions in place, asks Claude for changes, approves/rejects/revises Claude's comments, replies to other reviewers, and only what they **queue** lands in their pending GitHub review.
 
-Files at the repository root `$R` (the parent of this skill dir; `~/.claude/skills/review-artifact` when installed as the README says): `template.html` (the page), `scripts/mkdiff.py`, `scripts/ghthreads.py`, `scripts/build.py`, `scripts/seeds.py`, `scripts/ghsync.py`. Work in the session scratchpad (`$S` below), never in the repo. Run the session from a local clone of the PR's repo (the scripts use `git`). The scripts talk to GitHub over REST only (`gh api`), since GraphQL is blocked in cloud sessions.
+Files at the repository root `$R` (the directory holding `template.html`; `~/.claude/skills/review-artifact` when installed as the README says): `template.html` (the page), `scripts/mkdiff.py`, `scripts/ghthreads.py`, `scripts/build.py`, `scripts/seeds.py`, `scripts/ghsync.py`. Work in the session scratchpad (`$S` below), never in the repo. Run the session from a local clone of the PR's repo (the scripts use `git`). The scripts talk to GitHub over REST only (`gh api`), since GraphQL is blocked in cloud sessions.
 
 ## 1. Build
 
