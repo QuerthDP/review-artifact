@@ -800,7 +800,8 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     const pos = Math.min(parseInt(lsGet('focuspos') || '0', 10) || 0, ta.value.length);
     ta.focus({ preventScroll: true }); ta.setSelectionRange(pos, pos);
   }
-  function closeAll() { openComposer = null; openAsk = null; editing = null; fbOpen = false; showFbDone = false; fbCur = Infinity; subOpen = false; renderSubmit(); renderAll(); }
+  // Esc leaves every text box too: forget the remembered one so the re-render does not focus it again.
+  function closeAll() { lsSet('focus', ''); const a = document.activeElement; if (a && a.blur && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')) a.blur(); openComposer = null; openAsk = null; editing = null; fbOpen = false; showFbDone = false; fbCur = Infinity; subOpen = false; renderSubmit(); renderAll(); }
   // Submitting the review is the viewer's explicit, two-click action; Claude performs it on GitHub when notified.
   let subOpen = false;
   function toggleSubmit() { subOpen = !subOpen; if (subOpen && fbOpen) { fbOpen = false; renderFeedback(); } renderSubmit(); }
