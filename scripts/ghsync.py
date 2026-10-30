@@ -1,5 +1,5 @@
 """Mirror one comment doc into the user's pending GitHub review: ghsync.py <config.json> <comment.json>
-config.json: {"repo_dir", "head": "<PR head sha>", "review_id": "<PRR_... node id of the user's PENDING review>", "diff": "<diff.json>"}
+config.json: {"repo_dir", "head": "<PR head sha>", "review_id": "<PRR_... node id of the user's PENDING review; replaced automatically once it is submitted>", "diff": "<diff.json>"}
 comment.json: the doc as ArtifactData get/out_dir saved it. Queued -> add/update; not queued but in draft -> delete.
 Prints the ArtifactData "update" data to write back (always clears syncPending)."""
 import json, os, re, subprocess, sys
@@ -30,6 +30,12 @@ def body_of(c):
     if not c.get('path') and not c.get('replyTo'): b = '> ' + git('log', '-1', '--format=%s', c['commit']).strip() + '\n\n' + b
     if c['author'] == 'claude' and CLAUDE: b += '\n\n' + CLAUDE + (' ' + HUMAN if c.get('humanReviewed') and HUMAN else '')
     return b
+# After a submit the configured review is no longer pending: reuse the user's pending review or start one, and remember it.
+rv = gql('query{node(id:"%s"){...on PullRequestReview{state pullRequest{id reviews(states:PENDING,first:1){nodes{id}}}}}}' % REVIEW)['node']
+if rv['state'] != 'PENDING':
+    pend = rv['pullRequest']['reviews']['nodes']
+    REVIEW = pend[0]['id'] if pend else gql('mutation($p:ID!,$c:GitObjectID!){addPullRequestReview(input:{pullRequestId:$p,commitOID:$c}){pullRequestReview{id}}}', p=rv['pullRequest']['id'], c=HEAD)['addPullRequestReview']['pullRequestReview']['id']
+    CFG['review_id'] = REVIEW; json.dump(CFG, open(sys.argv[1], 'w')); print('new pending review', REVIEW, file=sys.stderr)
 c = json.load(open(sys.argv[2])); upd = {'syncPending': {'__delete__': True}}
 want = c.get('status') == 'queued' and c.get('source') != 'github'
 node = None
@@ -49,6 +55,11 @@ elif want:
     v = dict(r=REVIEW, p=path, b=body_of(c), t='LINE' if line else 'FILE')
     if line: v.update(l=line, s='RIGHT')
     th = gql(q, **v)['addPullRequestReviewThread']['thread']
+    if not th and line:  # GitHub refuses lines outside the PR's diff (expanded context): fall back to a file-level comment quoting the line.
+        code = git('show', HEAD + ':' + path).splitlines()[line - 1].strip()
+        v = dict(r=REVIEW, p=path, b='Line ' + str(line) + ': `' + code + '`\n\n' + body_of(c), t='FILE'); line = None
+        th = gql(q, **v)['addPullRequestReviewThread']['thread']
+    if not th: raise SystemExit('GitHub did not create the review thread')
     upd.update(inDraft=True, githubThreadId=th['id'], githubCommentId=th['comments']['nodes'][0]['databaseId'], githubPath=path); print('added', line, file=sys.stderr)
 elif node:
     gql('mutation($i:ID!){deletePullRequestReviewComment(input:{id:$i}){clientMutationId}}', i=node); print('removed', file=sys.stderr)
