@@ -30,7 +30,7 @@ Also import the user's existing pending GitHub review comments (if any) as docs 
 ## 3. Data model (db collections)
 
 - `comments/<id>`: `commit, path, line, startLine (first line of a multi-line comment, else null), side (LEFT|RIGHT), body, author (claude|user), status (proposed|queued|rejected|revise|posted), replyTo (review thread node id, for replies to other reviewers), humanReviewed, discussion[{role,text,at}], discussionHidden, note, prevStatus, editedByUser, revisedAt, inDraft, githubCommentId, githubThreadId, githubPath, syncPending, shellThreadId, source`.
-- `threads/<id>`: in-page conversations with Claude — `kind (question|modify|feedback), commit, path, line, startLine (multi-line requests cover startLine..line), side, status (asked|answered), dismissed (viewer hid an answered one; restorable from the queue), messages[{role,text,at}], shellThreadId`.
+- `threads/<id>`: in-page conversations with Claude — `kind (question|modify|feedback), commit, path, line, startLine (multi-line requests cover startLine..line), side, about (id of the comment or reviewer thread the conversation was started on with i, drawn inside it; the question names its text), status (asked|answered), dismissed (viewer hid an answered one; restorable from the queue), messages[{role,text,at}], shellThreadId`.
 - Reviewer threads are not in the db: they are snapshotted into the page from `gh.json` at build time.
 
 Claude's comments start **proposed**. Nothing reaches GitHub until the user clicks **Queue → GitHub draft** (or writes their own comment/reply, which is queued) — never queue on their behalf, never bulk-queue.
