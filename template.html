@@ -7,7 +7,7 @@
   --bg: #f6f4ef; --panel: #ffffff; --fg: #1d2126; --muted: #5f6670; --line: #d8d3c8; --line-soft: #ebe7de;
   --accent: #0e6b63; --accent-fg: #ffffff; --accent-soft: #d8ece9;
   --add-bg: #e3f3e6; --add-num: #c7e6cd; --del-bg: #fbe7e4; --del-num: #f4cdc7; --hunk-bg: #eef1f6;
-  --proposed: #a85a07; --proposed-soft: #fbeedb; --queued: #1a7a3c; --queued-soft: #dff3e4; --rejected: #6b7280; --rejected-soft: #ececec; --posted: #3b5bdb; --posted-soft: #e3e8fb;
+  --proposed: #a85a07; --proposed-soft: #fbeedb; --queued: #1a7a3c; --queued-soft: #dff3e4; --rejected: #6b7280; --rejected-soft: #ececec; --posted: #3b5bdb; --posted-soft: #e3e8fb; --warn: #b42318; --warn-soft: #fde7e4;
   --ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --shadow: 0 1px 2px rgba(20,24,28,.06), 0 6px 24px rgba(20,24,28,.08);
@@ -18,7 +18,7 @@
   --bg: #121415; --panel: #1b1e20; --fg: #e4e1da; --muted: #9aa1a8; --line: #2d3236; --line-soft: #24282b;
   --accent: #4fc3b5; --accent-fg: #0d1a18; --accent-soft: #15302d;
   --add-bg: #11301d; --add-num: #174126; --del-bg: #3a1917; --del-num: #4e2320; --hunk-bg: #1f2630;
-  --proposed: #f0a74a; --proposed-soft: #3a2a12; --queued: #6fd49a; --queued-soft: #14301f; --rejected: #9aa1a8; --rejected-soft: #26292c; --posted: #8ea4f2; --posted-soft: #1c2440;
+  --proposed: #f0a74a; --proposed-soft: #3a2a12; --queued: #6fd49a; --queued-soft: #14301f; --rejected: #9aa1a8; --rejected-soft: #26292c; --posted: #8ea4f2; --posted-soft: #1c2440; --warn: #f28b82; --warn-soft: #3a1917;
   --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.45);
   --chg-add: #1f6b3a; --chg-del: #7a2f2a; --flash: #4a3f12;
   --hl-kw: #d89cf0; --hl-str: #8fd3a5; --hl-cmt: #8a9199; --hl-num: #f0b06a; --hl-fn: #b9a6ff; --hl-type: #7fc6f2; --hl-attr: #f29bbf;
@@ -28,7 +28,7 @@
   --bg: #121415; --panel: #1b1e20; --fg: #e4e1da; --muted: #9aa1a8; --line: #2d3236; --line-soft: #24282b;
   --accent: #4fc3b5; --accent-fg: #0d1a18; --accent-soft: #15302d;
   --add-bg: #11301d; --add-num: #174126; --del-bg: #3a1917; --del-num: #4e2320; --hunk-bg: #1f2630;
-  --proposed: #f0a74a; --proposed-soft: #3a2a12; --queued: #6fd49a; --queued-soft: #14301f; --rejected: #9aa1a8; --rejected-soft: #26292c; --posted: #8ea4f2; --posted-soft: #1c2440;
+  --proposed: #f0a74a; --proposed-soft: #3a2a12; --queued: #6fd49a; --queued-soft: #14301f; --rejected: #9aa1a8; --rejected-soft: #26292c; --posted: #8ea4f2; --posted-soft: #1c2440; --warn: #f28b82; --warn-soft: #3a1917;
   --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.45);
   --chg-add: #1f6b3a; --chg-del: #7a2f2a; --flash: #4a3f12;
   --hl-kw: #d89cf0; --hl-str: #8fd3a5; --hl-cmt: #8a9199; --hl-num: #f0b06a; --hl-fn: #b9a6ff; --hl-type: #7fc6f2; --hl-attr: #f29bbf;
@@ -94,6 +94,7 @@ header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 .pill.you { background: var(--accent-soft); color: var(--accent); }
 .pill.claude { background: var(--posted-soft); color: var(--posted); }
 .pill.revise { background: var(--posted-soft); color: var(--posted); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
 .card.revise { border-left-color: var(--posted); }
 .ghthread { border: 1px solid var(--line); border-left: 3px solid var(--muted); border-radius: 8px; padding: 8px 10px; margin: 6px 0; background: var(--panel); }
 .ghthread > summary { cursor: pointer; list-style: none; flex-wrap: wrap; }
@@ -281,7 +282,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     const d = document.createElement('details'); d.className = 'ghthread'; d.id = 'ghs-' + t.id;
     d.open = ghOpen.has(t.id) || (!t.resolved && !ghClosed.has(t.id)) || !!(openComposer && openComposer.replyTo === t.id);
     d.addEventListener('toggle', () => { if (d.open) { ghOpen.add(t.id); ghClosed.delete(t.id); } else { ghOpen.delete(t.id); ghClosed.add(t.id); } });
-    const pills = (t.resolved ? '<span class="pill rejected">resolved</span>' : '<span class="pill proposed">open</span>') + (t.outdated ? '<span class="pill rejected">outdated</span>' : '');
+    const pills = (t.resolved ? '<span class="pill rejected">resolved</span>' : t.resolved === false ? '<span class="pill proposed">open</span>' : '') + (t.outdated ? '<span class="pill rejected">outdated</span>' : '');
     const first = t.comments[0];
     d.innerHTML = '<summary class="card-head"><b>' + esc(first.author) + '</b>' + pills + '<span>' + t.comments.length + ' comment' + (t.comments.length > 1 ? 's' : '') + ' · GitHub ' + esc(t.ghPath) + (t.ghLine ? ':' + t.ghLine : '') + '</span><a href="' + esc(first.url) + '" target="_blank" rel="noopener">open on GitHub</a></summary>' +
       t.comments.map(c => '<div class="ghc"><div class="ghwho"><b>' + esc(c.author) + '</b> <span>' + esc((c.at || '').slice(0, 10)) + '</span></div><div class="ghbody">' + cleanHTML(c.html) + '</div></div>').join('');
@@ -484,7 +485,13 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   async function remove(id) {
     if (!db) return false;
     const c = comments[id];
-    try { await db.collection('comments').doc(id).delete(); if (c && c.inDraft) syncGitHub(c, 'deleted; remove it from the draft'); return true; } catch (e) { toast('Could not delete'); return false; }
+    // A comment in the GitHub draft becomes a hidden tombstone: the sync takes it out of the draft (unless it was
+    // edited on GitHub meanwhile) and then deletes the doc.
+    if (c && (c.inDraft || c.deferred)) {
+      const ok = await write(id, { status: 'withdrawn', deleted: true, syncPending: true, updatedAt: new Date().toISOString() }, false);
+      if (ok) syncGitHub(c, 'deleted; remove it from the draft'); return ok;
+    }
+    try { await db.collection('comments').doc(id).delete(); return true; } catch (e) { toast('Could not delete'); return false; }
   }
   async function setStatus(id, status) {
     const c = comments[id]; if (!c) return;
@@ -520,7 +527,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   async function createComment(anchor, body) {
     const id = newId();
     const conv = !!anchor.replyToConv; // PR conversation replies can't live in a pending review: they wait here until posted
-    const doc = { commit: anchor.commit, path: anchor.path || null, line: anchor.line || null, side: anchor.side || null, startLine: anchor.startLine || null, replyTo: anchor.replyTo || null, replyToConv: anchor.replyToConv || null, convAuthor: anchor.convAuthor || null, body, author: 'user', status: 'queued', syncPending: !conv, createdAt: new Date().toISOString() };
+    const doc = { commit: anchor.commit, path: anchor.path || null, line: anchor.line || null, side: anchor.side || null, startLine: anchor.startLine || null, replyTo: anchor.replyTo || null, replyToCommentId: anchor.replyTo ? ((GH.threads.find(t => t.id === anchor.replyTo) || {}).rootCommentId || null) : null, replyToConv: anchor.replyToConv || null, convAuthor: anchor.convAuthor || null, body, author: 'user', status: 'queued', syncPending: !conv, createdAt: new Date().toISOString() };
     const ok = await write(id, doc, true);
     // The write's own snapshot re-renders before the composer is cleared, so render again once it is closed.
     if (ok) { dropDraft('c|' + draftKey(anchor)); openComposer = null; renderAll(); if (conv) toast('Queued; posted when you click "Post queued conversation replies"'); else { toast('Queued; adding to your GitHub draft'); syncGitHub(Object.assign({ id }, doc), 'new comment'); } }
@@ -543,12 +550,27 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     document.getElementById('next').disabled = current === COMMITS.length - 1;
   }
 
+  // Why a queued comment waits for the submit instead of sitting in the GitHub draft (shown on hover).
+  const DEFER_WHY = {
+    reply: 'GitHub cannot hold this reply in the draft; it is posted right after the review is submitted',
+    'file-level': 'file-level comments are added to the draft when you submit',
+    'commit-level': 'added when you submit, as a file comment quoting the commit subject',
+    'outside-diff': 'the line is outside the PR diff; added when you submit, as a file comment linking the line',
+    'draft-locked': 'your GitHub draft holds comments made on GitHub, so it is not rebuilt; added when you submit',
+    'rejected-by-github': 'GitHub refused the line; tried again when you submit',
+    'restore-failed': 'the draft could not be rebuilt; added when you submit',
+    edited: 'changed after it went into the draft; added again when you submit',
+  };
+  function ghWarn(c) {
+    const w = c.githubConflict || c.githubError || c.deferredError;
+    return w ? '<span class="pill warn" title="' + esc(w) + '">' + (c.githubConflict ? 'edited on GitHub' : 'GitHub error') + '</span>' : '';
+  }
   function card(c) {
     const who = c.author === 'claude' ? 'Claude' : 'You';
     const d = document.createElement('div'); d.className = 'card ' + c.status; d.dataset.cid = c.id; d.id = 'cds-' + c.id;
     let actions = '';
     const badge = c.author === 'claude' ? '<span class="pill claude">Generated with Claude Code</span>' + (c.humanReviewed ? '<span class="pill queued">Reviewed by Human</span>' : '') : '<b>' + who + '</b>';
-    const head = '<div class="card-head">' + badge + '<span class="pill ' + c.status + '">' + (c.status === 'revise' ? 'revision requested' : c.status) + '</span>' + (c.editedByUser ? '<span>edited by you</span>' : '') + (c.revisedAt ? '<span>revised by Claude</span>' : '') + (c.path ? (c.line ? (c.startLine ? '<span>lines ' + c.startLine + '–' + c.line + '</span>' : '') : '<span>file-level</span>') : '<span>commit-level</span>') + (c.replyToConv && c.status === 'queued' ? '<span class="pill proposed">waits for "Post queued conversation replies"</span>' : c.syncPending ? '<span class="pill revise">syncing to GitHub…</span>' : c.source === 'github' || (c.inDraft && c.status === 'queued') ? '<span class="pill posted">in your GitHub draft</span>' : '') + '</div>';
+    const head = '<div class="card-head">' + badge + '<span class="pill ' + c.status + '">' + (c.status === 'revise' ? 'revision requested' : c.status) + '</span>' + (c.editedByUser ? '<span>edited by you</span>' : '') + (c.revisedAt ? '<span>revised by Claude</span>' : '') + (c.path ? (c.line ? (c.startLine ? '<span>lines ' + c.startLine + '–' + c.line + '</span>' : '') : '<span>file-level</span>') : '<span>commit-level</span>') + (c.replyToConv && c.status === 'queued' ? '<span class="pill proposed">waits for "Post queued conversation replies"</span>' : c.syncPending ? '<span class="pill revise">syncing to GitHub…</span>' : c.status === 'queued' && c.deferred ? '<span class="pill proposed" title="' + esc(DEFER_WHY[c.deferred] || c.deferred) + '">added at submit</span>' : c.source === 'github' || (c.inDraft && c.status === 'queued') ? '<span class="pill posted">in your GitHub draft</span>' : '') + ghWarn(c) + '</div>';
     // The revision box opens under the conversation already held with Claude, which stays visible.
     const pastMsgs = (c.discussion || []).map(m => '<div class="msg-row ' + m.role + '"><span class="who">' + (m.role === 'claude' ? 'Claude' : 'You') + '</span><div class="body">' + md(m.text) + '</div></div>').join('');
     if (editing === c.id && c.author === 'claude') {
@@ -870,10 +892,10 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     const old = document.getElementById('sub-panel'); const keep = old ? { body: old.querySelector('#sub-body').value, ev: (old.querySelector('input[name=subev]:checked') || {}).value } : null;
     if (old) old.remove(); if (!subOpen) return;
     const all = Object.values(comments);
-    const inDraft = all.filter(x => x.status === 'queued' && !x.replyToConv).length, conv = all.filter(x => x.status === 'queued' && x.replyToConv).length, syncing = all.filter(x => x.syncPending).length;
+    const queued = all.filter(x => x.status === 'queued' && !x.replyToConv), atSubmit = queued.filter(x => x.deferred).length, inDraft = queued.length - atSubmit, conv = all.filter(x => x.status === 'queued' && x.replyToConv).length, syncing = all.filter(x => x.syncPending).length;
     const p = document.createElement('div'); p.id = 'sub-panel'; p.className = 'fbpanel';
     p.innerHTML = '<div class="fbpanel-head"><b>Submit your review</b><button class="btn small" aria-label="Close">✕</button></div>' +
-      '<div class="hint">' + inDraft + ' comment' + (inDraft === 1 ? '' : 's') + ' in your pending GitHub review' + (syncing ? ' · ' + syncing + ' still syncing' : '') + '. Submitting makes them public.</div>' +
+      '<div class="hint">' + inDraft + ' comment' + (inDraft === 1 ? '' : 's') + ' in your pending GitHub review' + (atSubmit ? ' + ' + atSubmit + ' added at submit' : '') + (syncing ? ' · ' + syncing + ' still syncing' : '') + '. Submitting makes them public.</div>' +
       '<textarea id="sub-body" placeholder="Review summary (optional)"></textarea>' +
       '<div class="subev">' + [['COMMENT', 'Comment'], ['APPROVE', 'Approve'], ['REQUEST_CHANGES', 'Request changes']].map(([v, l], i) => '<label><input type="radio" name="subev" value="' + v + '"' + (i === 0 ? ' checked' : '') + '> ' + l + '</label>').join('') + '</div>' +
       (conv ? '<label class="subconv"><input type="checkbox" id="sub-conv" checked> Also post ' + conv + ' queued conversation repl' + (conv === 1 ? 'y' : 'ies') + '</label>' : '') +
@@ -890,7 +912,10 @@ body.nopointer, body.nopointer * { cursor: none !important; }
       // Docs still syncing need Claude to update the draft first, so those submits go through Claude.
       if (mcp && !syncing) {
         go.disabled = true; go.textContent = 'Submitting to GitHub…'; ghStatus('Submitting your review to GitHub…');
-        try { await submitDirect(ev, body, withConv); dropDraft('sub-body'); subOpen = false; renderSubmit(); ghStatus('Review submitted on GitHub', REPO + '/pull/' + PR_NUMBER, 6000); return; }
+        try {
+          const failed = await submitDirect(ev, body, withConv); dropDraft('sub-body'); subOpen = false; renderSubmit();
+          ghStatus(failed ? 'Review submitted; ' + failed + ' repl' + (failed === 1 ? 'y' : 'ies') + ' not posted (see the GitHub error pill)' : 'Review submitted on GitHub', REPO + '/pull/' + PR_NUMBER, failed ? 0 : 6000); return;
+        }
         catch (e) { ghStatus(null); toast('GitHub call failed (' + (e && e.code || 'error') + '); asking Claude to submit'); }
       }
       const sent = await notifyClaude({ id: 'submit-' + Date.now().toString(36) }, 'event=' + ev + ' postConversationReplies=' + (withConv ? 'yes' : 'no') + '\n' + body, document.getElementById('submitrev'), 'submit review');
@@ -909,16 +934,66 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     el.textContent = msg + (href ? ' · ' : ''); if (href) { const a = document.createElement('a'); a.href = href; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'open on GitHub'; el.appendChild(a); }
     if (ms) setTimeout(() => { if (el.isConnected && el.firstChild && el.firstChild.textContent.startsWith(msg)) el.remove(); }, ms);
   }
+  const errText = e => String((e && (e.message || e.code)) || 'error').slice(0, 300);
+  // The viewer's pending review (only its author can see it), or null.
+  async function pendingReview(base) {
+    for (let page = 1; page <= 10; page++) {
+      const r = await mcp.callTool(GH_SERVER, 'pull_request_read', Object.assign({ method: 'get_reviews', perPage: 100, page }, base));
+      const list = Array.isArray(r && r.payload) ? r.payload : [];
+      const p = list.find(x => x.state === 'PENDING'); if (p) return p;
+      if (list.length < 100) return null;
+    }
+    return null;
+  }
+  // Submits in order: comments the sync could not put into the draft are added to it, the review is submitted with
+  // the draft's own body kept ahead of the summary, then replies are posted (GitHub takes them only after a submit).
+  // A doc is marked posted only once its own call succeeded. Throws before the submit, so Claude can take over;
+  // resolves with the number of replies left unposted.
   async function submitDirect(ev, body, withConv) {
-    const [owner, repo] = REPO_SLUG.split('/'), now = new Date().toISOString();
+    const [owner, repo] = REPO_SLUG.split('/'), now = new Date().toISOString(), base = { owner, repo, pullNumber: PR_NUMBER };
     if (withConv) for (const c of Object.values(comments).filter(x => x.status === 'queued' && x.replyToConv)) {
       ghStatus('Posting conversation replies…');
       const r = await mcp.callTool(GH_SERVER, 'add_issue_comment', { owner, repo, issue_number: PR_NUMBER, body: 'In reply to [' + (c.convAuthor || 'comment') + '](' + c.replyToConv + '):\n\n' + c.body });
       await write(c.id, { status: 'posted', githubUrl: (r && r.payload && r.payload.html_url) || null, postedAt: now });
     }
+    const queued = Object.values(comments).filter(x => x.status === 'queued' && !x.replyToConv);
+    const adds = queued.filter(x => x.deferred && x.githubPlan && x.githubPlan.kind !== 'reply');
+    const replies = queued.filter(x => x.deferred && x.githubPlan && x.githubPlan.kind === 'reply');
+    const inDraft = queued.filter(x => !x.deferred && (x.inDraft || x.source === 'github'));
+    ghStatus('Reading your GitHub draft…');
+    let draft = await pendingReview(base);
+    if (!draft && adds.length) {
+      await mcp.callTool(GH_SERVER, 'pull_request_review_write', Object.assign({ method: 'create' }, base));
+      draft = await pendingReview(base); if (!draft) throw new Error('no pending review after creating one');
+    }
+    for (const c of adds) {
+      ghStatus('Adding comments to your GitHub draft…');
+      const p = c.githubPlan, a = Object.assign({ path: p.path, body: p.body, subjectType: p.kind === 'line' ? 'LINE' : 'FILE' }, base);
+      if (p.kind === 'line') { a.line = p.line; a.side = p.side || 'RIGHT'; if (p.startLine) { a.startLine = p.startLine; a.startSide = a.side; } }
+      try { await mcp.callTool(GH_SERVER, 'add_comment_to_pending_review', a); }
+      catch (e) { await write(c.id, { deferredError: errText(e) }); throw e; }
+      // The connector returns no comment id: the next sync finds the comment by its path and text.
+      await write(c.id, { inDraft: true, githubBody: p.body, githubPath: p.path, deferred: null, githubPlan: null, deferredError: null });
+      inDraft.push(c);
+    }
     ghStatus('Submitting your review to GitHub…');
-    await mcp.callTool(GH_SERVER, 'pull_request_review_write', { method: 'submit_pending', owner, repo, pullNumber: PR_NUMBER, event: ev, body });
-    for (const c of Object.values(comments).filter(x => x.status === 'queued' && !x.replyToConv)) await write(c.id, { status: 'posted', postedAt: now });
+    if (draft) {
+      const kept = (draft.body || '').trim(), full = !kept ? body : !body || kept.includes(body) ? kept : kept + '\n\n' + body;
+      await mcp.callTool(GH_SERVER, 'pull_request_review_write', Object.assign({ method: 'submit_pending', event: ev, body: full }, base));
+    } else if (body || ev !== 'COMMENT') await mcp.callTool(GH_SERVER, 'pull_request_review_write', Object.assign({ method: 'create', event: ev, body }, base));
+    for (const c of inDraft) await write(c.id, { status: 'posted', postedAt: now });
+    let failed = 0;
+    for (const c of replies) {
+      ghStatus('Posting replies…');
+      const p = c.githubPlan;
+      try {
+        if (!p.inReplyTo) throw new Error('no GitHub comment id for this thread');
+        const r = await mcp.callTool(GH_SERVER, 'add_reply_to_pull_request_comment', Object.assign({ commentId: Number(p.inReplyTo), body: p.body }, base));
+        const x = (r && r.payload) || {};
+        await write(c.id, { status: 'posted', postedAt: now, githubUrl: x.html_url || null, githubCommentId: x.id ? Number(x.id) : null, deferred: null, githubPlan: null, deferredError: null });
+      } catch (e) { failed++; await write(c.id, { deferredError: errText(e) }); }
+    }
+    return failed;
   }
   // Feedback conversations with Claude live in a panel by the Feedback button, never in the diff.
   let fbOpen = false, showFbDone = false;
@@ -1249,7 +1324,8 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     db = ns;
     if (!db) { document.getElementById('dbbanner').hidden = false; dbReady = true; renderQueue(); return; }
     db.collection('comments').onSnapshot(snap => {
-      const next = {}; snap.docs.forEach(d => { if (d.exists) next[d.id] = Object.assign({ id: d.id }, d.data()); });
+      // Tombstones (deleted while in the GitHub draft) wait for the sync, hidden.
+      const next = {}; snap.docs.forEach(d => { if (d.exists && !d.data().deleted) next[d.id] = Object.assign({ id: d.id }, d.data()); });
       comments = next; dbReady = true; renderAll(); restorePos();
     }, err => { document.getElementById('dbbanner').hidden = false; dbReady = true; renderQueue(); });
     db.collection('threads').onSnapshot(snap => {
