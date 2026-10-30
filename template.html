@@ -301,6 +301,13 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   // A send that may have gone through (no receipt in time) is not reported as failed; notifyErr holds only definite failures.
   const DEFINITE = ['consent_required', 'claude_unavailable', 'not_granted', 'capability_disabled', 'capability_removed', 'forbidden', 'invalid', 'rate_limited'];
   let notifyErr = null;
+  // The automatic reply sees only this text, so name the file, line and code the request is about.
+  function whereText(t, el) {
+    if (!t.path) return '';
+    const row = el && el.closest && el.closest('tr'), cells = row ? Array.from(row.querySelectorAll('td.code:not(.empty)')) : [];
+    const code = cells.length ? cells[cells.length - 1].textContent.replace(/^[+−\s]+/, '').trim().slice(0, 200) : '';
+    return '\n\n(on ' + t.path + (t.line ? ':' + t.line : '') + (code ? ': `' + code + '`' : '') + ')';
+  }
   async function notifyClaude(t, text, el, kind) {
     notifyErr = null;
     if (!cm) cm = await cmReady;
@@ -308,7 +315,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     try {
       if (t.shellThreadId) { await cm.sendToClaude({ threadId: t.shellThreadId, text }); return t.shellThreadId; }
       const anchor = await cm.anchorFor(el);
-      const r = await cm.sendToClaude({ anchor, text: '[' + (kind || 'page question') + ' ' + t.id + '] ' + text });
+      const r = await cm.sendToClaude({ anchor, text: '[' + (kind || 'page question') + ' ' + t.id + '] ' + text + whereText(t, el) });
       return r.threadId;
     } catch (e) {
       const code = e && e.code; notifyErr = DEFINITE.includes(code) ? code : null;
