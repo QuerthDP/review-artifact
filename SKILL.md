@@ -55,7 +55,7 @@ The page sends a shell comment via `sendToClaude` for every action that needs Cl
 
 Then resolve the shell comment thread (`ArtifactComments resolve`). An auto-reply from the harness ("On it…") does NOT mean the work was done — always do the work. When the user asks "are you responding?", query **all** pending state: comments with `status: revise`, threads with `status: asked`, docs with `syncPending`, and open shell threads.
 
-`$S/ghsync.json`: `{"repo_dir": "...", "head": "<PR head sha>", "review_id": "<PRR_… node id>", "diff": "$S/diff.json"}`. Find the user's pending review via GraphQL `pullRequest.reviews(states: PENDING)`; if none exists, create one with `addPullRequestReview` (no `event`) — it stays private until the user submits it. Never submit the review.
+`$S/ghsync.json`: `{"repo_dir": "...", "repo": "<owner/name>", "pr": <number>, "head": "<PR head sha>", "review_id": "<PRR_… node id>", "diff": "$S/diff.json"}`. Find the user's pending review via GraphQL `pullRequest.reviews(states: PENDING)`; if none exists, create one with `addPullRequestReview` (no `event`) — it stays private until the user submits it. Never submit the review.
 
 ## 5. GitHub rules
 
