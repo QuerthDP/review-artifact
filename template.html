@@ -152,7 +152,8 @@ table.diff td { padding: 0; vertical-align: top; white-space: pre; }
 td.num { width: 52px; min-width: 52px; text-align: right; padding-right: 8px !important; color: var(--muted); user-select: none; border-right: 1px solid var(--line-soft); position: relative; font-size: 12px; }
 td.num.left { padding-left: 4px !important; }
 .lbtns { position: absolute; left: 1px; top: 1px; display: none; gap: 1px; z-index: 1; }
-tr.line:hover .lbtns { display: flex; }
+/* A hidden pointer resting over a row must not trigger hover buttons or highlights. */
+body:not(.nopointer) tr.line:hover .lbtns { display: flex; }
 .lbtns button { width: 16px; height: 16px; border-radius: 3px; border: none; padding: 0; cursor: pointer; font: 600 11px/16px system-ui, sans-serif; text-align: center; overflow: hidden; }
 .addbtn { background: var(--accent); color: var(--accent-fg); font-size: 13px !important; }
 .askbtn { background: var(--posted); color: var(--panel); }
@@ -182,8 +183,8 @@ tr.line.sel.sel-last td:first-child { box-shadow: inset 3px 0 0 var(--accent), i
 .xbtns { display: inline-flex; gap: 4px; margin-right: 8px; vertical-align: middle; }
 .xbtn { border: 1px solid var(--line); background: var(--panel); color: var(--accent, var(--fg)); border-radius: 4px; padding: 0 6px; font: inherit; font-size: 11px; cursor: pointer; line-height: 18px; }
 .xbtn:hover { background: var(--accent-soft, var(--bg)); }
-tr.line:hover td.code { filter: brightness(.96); }
-:root[data-theme="dark"] tr.line:hover td.code { filter: brightness(1.15); }
+body:not(.nopointer) tr.line:hover td.code { filter: brightness(.96); }
+:root[data-theme="dark"] body:not(.nopointer) tr.line:hover td.code { filter: brightness(1.15); }
 .marker { display: inline-block; width: 12px; color: var(--muted); }
 .btn.ask { color: var(--posted); border-color: var(--posted); }
 .chat { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--posted); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
@@ -1207,7 +1208,8 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   // The mouse pointer hides after two idle seconds or on a key press, and comes back when the mouse moves.
   let idleT;
   function hidePointer() { document.body.classList.add('nopointer'); }
-  window.addEventListener('mousemove', () => { document.body.classList.remove('nopointer'); clearTimeout(idleT); idleT = setTimeout(hidePointer, 2000); }, { passive: true });
+  // Scrolling under a still mouse fires mousemove with no movement in some browsers; only real movement shows the pointer.
+  window.addEventListener('mousemove', e => { if (!e.movementX && !e.movementY) return; document.body.classList.remove('nopointer'); clearTimeout(idleT); idleT = setTimeout(hidePointer, 2000); }, { passive: true });
   window.addEventListener('keydown', hidePointer);
   // A reload keeps the place: the selected line goes back to where it sat on screen, or else the page to its old offset.
   let restoring = true;
