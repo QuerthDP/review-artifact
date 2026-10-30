@@ -21,3 +21,6 @@ for i, x in enumerate(json.load(open(findings)), 1):
         "author": "claude", "status": "proposed", "createdAt": datetime.datetime.now(datetime.timezone.utc).isoformat()}})
 json.dump(writes, open(out, "w"), indent=1)
 for w in writes: print(w["doc_id"], w["data"]["commit"][:7], w["data"]["path"], w["data"]["line"])
+
+def count_open(findings):  # scratch helper for the cloud review test
+    return len([f for f in findings if f.get('status') != 'rejected']) + 1
