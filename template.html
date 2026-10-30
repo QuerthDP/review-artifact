@@ -89,7 +89,7 @@ header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 .pill { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
 .pill.proposed { background: var(--proposed-soft); color: var(--proposed); }
 .pill.queued { background: var(--queued-soft); color: var(--queued); }
-.pill.rejected { background: var(--rejected-soft); color: var(--rejected); }
+.pill.rejected, .pill.withdrawn { background: var(--rejected-soft); color: var(--rejected); }
 .pill.posted { background: var(--posted-soft); color: var(--posted); }
 .pill.you { background: var(--accent-soft); color: var(--accent); }
 .pill.claude { background: var(--posted-soft); color: var(--posted); }
@@ -203,7 +203,7 @@ tr.cmt td { padding: 0 !important; white-space: normal; font-family: var(--ui); 
 .thread { padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; max-width: 90ch; }
 
 .card { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 8px; padding: 8px 10px; }
-.card.proposed { border-left-color: var(--proposed); } .card.queued { border-left-color: var(--queued); } .card.rejected { border-left-color: var(--rejected); opacity: .8; } .card.posted { border-left-color: var(--posted); }
+.card.proposed { border-left-color: var(--proposed); } .card.queued { border-left-color: var(--queued); } .card.rejected, .card.withdrawn { border-left-color: var(--rejected); opacity: .8; } .card.withdrawn > .body { text-decoration: line-through; text-decoration-color: var(--rejected); } .card.posted { border-left-color: var(--posted); }
 .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
 .card-head b { color: var(--fg); font-weight: 600; }
 .body { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -560,6 +560,8 @@ body.nopointer, body.nopointer * { cursor: none !important; }
       if (c.status === 'proposed') actions = '<button class="btn primary small" data-act="approve">Queue → GitHub draft</button>' + (c.author === 'claude' ? reviewed : '') + revise + '<button class="btn small" data-act="reject">Reject</button>';
       else if (c.status === 'queued') actions = c.source === 'github' ? '' : (c.author === 'claude' ? reviewed + revise + '<button class="btn small" data-act="unqueue">Unqueue (remove from draft)</button>' : revise + '<button class="btn small" data-act="delete">Delete</button>');
       else if (c.status === 'rejected') actions = '<button class="btn small" data-act="restore">Restore</button>';
+      // Claude withdraws its own comment when a conversation shows it no longer holds; it stays visible and can be restored.
+      else if (c.status === 'withdrawn') actions = '<button class="btn small" data-act="restore">Restore (I still want it)</button>';
       else if (c.status === 'revise') actions = '<button class="btn small" data-act="cancelrevise">Withdraw request</button>';
       const disc = c.discussion || [];
       const legacy = c.status === 'revise' && c.note && !disc.some(m => m.role === 'user' && m.text === c.note) ? [{ role: 'user', text: c.note }] : [];
@@ -818,7 +820,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
       b.onclick = () => { if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Click again: post publicly now'; return; } notifyClaude({ id: 'conv-' + Date.now().toString(36) }, convQueued.map(x => x.id).join(', '), document.getElementById('queue'), 'post conversation replies'); convQueued.forEach(x => write(x.id, { syncPending: true }, false)); toast('Sent to Claude to post'); };
       g.appendChild(b); el.appendChild(g);
     }
-    const groups = [['revise', 'Sent to Claude for revision'], ['queued', 'Queued: in your GitHub draft'], ['proposed', 'Proposed by Claude, awaiting your call'], ['rejected', 'Rejected'], ['posted', 'Posted']];
+    const groups = [['revise', 'Sent to Claude for revision'], ['queued', 'Queued: in your GitHub draft'], ['proposed', 'Proposed by Claude, awaiting your call'], ['rejected', 'Rejected'], ['withdrawn', 'Withdrawn by Claude'], ['posted', 'Posted']];
     groups.forEach(([st, label]) => {
       const items = all.filter(x => x.status === st); if (!items.length) return;
       const g = document.createElement('div'); g.className = 'qgroup'; g.innerHTML = '<h3><span class="pill ' + st + '">' + items.length + '</span>' + label + '</h3>';
