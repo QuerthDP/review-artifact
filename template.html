@@ -357,6 +357,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     if (ok) { dropDraft('fu-' + t.id); toast(shellThreadId || !notifyErr ? 'Sent to Claude' : 'Follow-up saved'); }
   }
   function askComposer(anchor, el) {
+    if (anchor.kind !== 'feedback') noteDraftAt('a|' + draftKey(anchor), anchor);
     const d = document.createElement('div'); d.className = 'composer'; d.style.borderColor = 'var(--posted)';
     const where = anchor.path ? anchor.path + lineLabel(anchor) : 'commit ' + COMMITS[anchor.commitIdx].short;
     const mod = anchor.kind === 'modify', fb = anchor.kind === 'feedback';
@@ -434,7 +435,10 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   const draftKey = a => [a.kind || '', a.commit, a.path || '', a.line || '', a.side || '', a.replyTo || '', a.replyToConv || ''].join('|');
   let drafts = {}; try { drafts = JSON.parse(lsGet('drafts') || '{}') || {}; } catch (e) {}
   const taKey = ta => ta.dataset.draft || ta.id;
-  function dropDraft(k) { if (k in drafts) { delete drafts[k]; lsSet('drafts', JSON.stringify(drafts)); } }
+  // Each comment or question draft remembers where its composer was, so the queue can reopen it after Esc.
+  let draftAt = {}; try { draftAt = JSON.parse(lsGet('draftat') || '{}') || {}; } catch (e) {}
+  function noteDraftAt(k, anchor) { draftAt[k] = Object.assign({}, anchor); lsSet('draftat', JSON.stringify(draftAt)); }
+  function dropDraft(k) { if (k in drafts) { delete drafts[k]; lsSet('drafts', JSON.stringify(drafts)); } if (k in draftAt) { delete draftAt[k]; lsSet('draftat', JSON.stringify(draftAt)); } }
   function restoreDrafts() { document.querySelectorAll('textarea').forEach(ta => { const k = taKey(ta); if (k && drafts[k] && ta.value !== drafts[k]) ta.value = drafts[k]; }); }
   document.addEventListener('input', e => { const ta = e.target; if (ta.tagName !== 'TEXTAREA' || !taKey(ta)) return; if (ta.value.trim()) drafts[taKey(ta)] = ta.value; else delete drafts[taKey(ta)]; lsSet('drafts', JSON.stringify(drafts)); });
   function saveUi() { lsSet('ui', JSON.stringify({ openComposer, openAsk, editing, fbOpen, subOpen })); }
@@ -563,6 +567,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   }
 
   function composer(anchor) {
+    noteDraftAt('c|' + draftKey(anchor), anchor);
     const d = document.createElement('div'); d.className = 'composer';
     const where = anchor.path ? anchor.path + lineLabel(anchor) : 'commit-level comment on ' + COMMITS[anchor.commitIdx].short;
     d.innerHTML = '<div class="hint">' + (anchor.replyToConv ? 'Reply to ' + esc(anchor.convAuthor || '') + ' in the PR conversation · queued until you post it' : (anchor.replyTo ? 'Reply' : 'New comment') + ' · ' + esc(where) + ' · queued as yours') + '</div><textarea id="composer-ta" data-draft="c|' + esc(draftKey(anchor)) + '" placeholder="Write the review comment as it should appear on GitHub"></textarea><div class="actions"><button class="btn primary small" id="composer-save">Queue comment</button><button class="btn small" id="composer-cancel">Cancel</button></div>';
@@ -751,6 +756,19 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     const el = document.getElementById('queue'); el.innerHTML = '<h2>Review queue</h2>';
     const all = Object.values(comments).sort((a, b) => (a.commit === b.commit ? 0 : COMMITS.findIndex(c => c.sha === a.commit) - COMMITS.findIndex(c => c.sha === b.commit)) || (a.path || '').localeCompare(b.path || '') || (a.line || 0) - (b.line || 0));
     if (!all.length && !Object.keys(threads).length) { el.innerHTML += '<div class="empty">' + (dbReady ? 'No comments yet. Hover a diff line and press + to add one.' : 'Loading comments…') + '</div>'; return; }
+    const unsent = Object.keys(drafts).filter(k => draftAt[k] && (drafts[k] || '').trim() && !(openComposer && 'c|' + draftKey(openComposer) === k) && !(openAsk && 'a|' + draftKey(openAsk) === k));
+    if (unsent.length) {
+      const g = document.createElement('div'); g.className = 'qgroup';
+      g.innerHTML = '<h3><span class="pill proposed">' + unsent.length + '</span>Unsent drafts</h3>';
+      unsent.forEach(k => {
+        const a = draftAt[k], ci = COMMITS.findIndex(c => c.sha === a.commit); if (ci < 0) return;
+        const b = document.createElement('button'); b.className = 'qitem';
+        b.innerHTML = '<div class="where">' + (ci + 1) + ' · ' + esc(a.path ? a.path + lineLabel(a) : 'commit-level') + ' · ' + (k[0] === 'c' ? 'comment' : a.kind === 'modify' ? 'change request' : 'question') + '</div><div class="snip">' + esc(drafts[k].split('\n')[0]) + '</div>';
+        b.onclick = () => { go(ci); const an = Object.assign({}, a, { commitIdx: ci }); if (k[0] === 'c') { openComposer = an; openAsk = null; } else { openAsk = an; openComposer = null; } renderAll(); setTimeout(() => { const t = document.getElementById(k[0] === 'c' ? 'composer-ta' : 'ask-ta'); if (t) { const sec = t.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; } t.scrollIntoView({ block: 'center' }); t.focus(); } }, 0); };
+        g.appendChild(b);
+      });
+      el.appendChild(g);
+    }
     const allConvs = Object.values(threads).filter(t => !(t.kind === 'feedback' && t.status === 'answered')), hiddenN = allConvs.filter(t => t.dismissed).length;
     const convs = allConvs.filter(visibleThread);
     if (allConvs.length) {
