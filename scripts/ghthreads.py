@@ -2,8 +2,9 @@
 REST only (GraphQL is blocked in some sessions). Each review thread is anchored to the PR commit that last changed its
 line (git blame at the PR head, or at the comment's original commit when outdated) and carries rootCommentId, the
 numeric id of its first comment, which replies are posted to. The viewer's pending comments are not listed by REST.
-REST has no resolved state: one GraphQL read fills it in when it is reachable, otherwise resolved is null (unknown)."""
-import json, re, subprocess, sys
+REST has no resolved state: one GraphQL read fills it in when it is reachable, otherwise resolved is null (unknown).
+The viewer's login comes from GH_LOGIN when set, else from the user endpoint."""
+import json, os, re, subprocess, sys
 repo_dir, slug, num, diff, out = sys.argv[1:6]
 owner, name = slug.split('/')
 def git(*a): return subprocess.run(['git', '-C', repo_dir, *a], capture_output=True, text=True, errors='replace').stdout
@@ -11,7 +12,7 @@ def api(path):  # every page, with rendered HTML bodies (body_html)
     r = subprocess.run(['gh', 'api', '--paginate', '--slurp', '-H', 'Accept: application/vnd.github.full+json', f'repos/{slug}/{path}'],
                        capture_output=True, text=True, check=True)
     return [x for page in json.loads(r.stdout) for x in page]
-me = subprocess.run(['gh', 'api', 'user', '--jq', '.login'], capture_output=True, text=True, check=True).stdout.strip()
+me = os.environ.get('GH_LOGIN') or subprocess.run(['gh', 'api', 'user', '--jq', '.login'], capture_output=True, text=True, check=True).stdout.strip()
 head = json.loads(subprocess.run(['gh', 'api', f'repos/{slug}/pulls/{num}'], capture_output=True, text=True, check=True).stdout)['head']['sha']
 rc = api(f'pulls/{num}/comments?per_page=100')
 resolved = {}  # root comment id -> isResolved
