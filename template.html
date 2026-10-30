@@ -133,7 +133,7 @@ body.queue-hidden main { grid-template-columns: minmax(0, 1fr); } body.queue-hid
 
 .file { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; scroll-margin-top: calc(env(safe-area-inset-top, 0px) + var(--head-h, 96px) + 12px); }
 .file-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); border-radius: 10px 10px 0 0; position: sticky; top: calc(env(safe-area-inset-top, 0px) + var(--head-h, 96px)); background: var(--panel); z-index: 2; flex-wrap: wrap; }
-tr.line, tr.cmt { scroll-margin-top: calc(env(safe-area-inset-top, 0px) + var(--head-h, 96px) + 48px); }
+tr.line, tr.cmt { scroll-margin-top: calc(env(safe-area-inset-top, 0px) + var(--head-h, 96px) + var(--fh-h, 40px) + 8px); }
 .diffwrap { border-radius: 0 0 10px 10px; }
 .file-head .path { font-family: var(--mono); font-size: 12px; font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
 .file-head .tag { font-size: 10px; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; color: var(--muted); }
@@ -911,7 +911,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   }
   // Header panels open just under the button that opened them, not below the whole header.
   function placePanels() { [['fb-panel', 'feedback'], ['sub-panel', 'submitrev']].forEach(([pid, bid]) => { const p = document.getElementById(pid), b = document.getElementById(bid); if (!p || !b) return; const top = Math.max(8, Math.round(b.getBoundingClientRect().bottom + 6)); p.style.top = top + 'px'; p.style.maxHeight = 'calc(100vh - ' + (top + 16) + 'px)'; }); }
-  function measureHead() { document.documentElement.style.setProperty('--head-h', document.getElementById('top').offsetHeight + 'px'); }
+  function measureHead() { const st = document.documentElement.style, fh = document.querySelector('#files .file-head'); st.setProperty('--head-h', document.getElementById('top').offsetHeight + 'px'); if (fh) st.setProperty('--fh-h', fh.offsetHeight + 'px'); }
   function go(i) { if (i < 0 || i >= COMMITS.length) return; current = i; cursorId = null; openComposer = null; editing = null; location.hash = 'commit-' + (i + 1); renderAll(); window.scrollTo({ top: 0 }); }
   function fromHash() { const m = /^#commit-(\d+)$/.exec(location.hash); const i = m ? parseInt(m[1], 10) - 1 : 0; if (i >= 0 && i < COMMITS.length && i !== current) { current = i; openComposer = null; editing = null; renderAll(); } }
 
@@ -954,15 +954,17 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   function applyCursor() { document.querySelectorAll('.kcur').forEach(x => x.classList.remove('kcur')); const el = cursorId && document.getElementById(cursorId); if (el) el.classList.add('kcur'); }
   function setCursor(el, scroll) {
     if (!el || !el.id) return; cursorId = el.id; applyCursor(); savePos(); if (scroll === false) return;
-    const r = el.getBoundingClientRect(), topPad = 150, botPad = 60;
+    const r = el.getBoundingClientRect(), topPad = coverTop() + 12, botPad = 60;
     if (r.top < topPad) window.scrollBy(0, r.top - topPad); else if (r.bottom > window.innerHeight - botPad) window.scrollBy(0, r.bottom - window.innerHeight + botPad);
   }
+  // Height covered by the sticky page header and the sticky file header; a selected line must stay below it.
+  function coverTop() { const fh = document.querySelector('#files .file-head'); return document.getElementById('top').offsetHeight + (fh ? fh.offsetHeight : 0); }
   function current_() { const el = cursorId && document.getElementById(cursorId); return el && el.classList.contains('kcur') ? el : null; }
   function nearestStop(list, y) { let best = list[0], bd = Infinity; list.forEach(el => { const d = Math.abs(el.getBoundingClientRect().top - y); if (d < bd) { bd = d; best = el; } }); return best; }
   function moveCursor(dir) {
     const list = stops(); if (!list.length) return; lastCmt = null;
     const cur = lineOf(current_()); const i = cur ? list.indexOf(cur) : -1;
-    setCursor(i < 0 ? nearestStop(list, 160) : list[Math.max(0, Math.min(list.length - 1, i + dir))]);
+    setCursor(i < 0 ? nearestStop(list, coverTop() + 12) : list[Math.max(0, Math.min(list.length - 1, i + dir))]);
   }
   // A selected comment card stands for the diff line it hangs under (j / l, k, i, m); file-level cards for the file header.
   function lineOf(el) {
@@ -976,7 +978,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     const list = arrowStops(); if (!list.length) return; lastCmt = null;
     const cur = current_(); const i = cur ? list.indexOf(cur) : -1;
     if (i === 0 && dir < 0) { toCommits(); return; }
-    setCursor(i < 0 ? nearestStop(list, 160) : list[Math.max(0, Math.min(list.length - 1, i + dir))]);
+    setCursor(i < 0 ? nearestStop(list, coverTop() + 12) : list[Math.max(0, Math.min(list.length - 1, i + dir))]);
   }
   function toCommits() { region = 'commits'; document.querySelectorAll('.kcur').forEach(x => x.classList.remove('kcur')); markStep(); window.scrollTo({ top: 0 }); }
   function markStep() { document.querySelectorAll('#stepper .step').forEach((b, i) => b.classList.toggle('qcur', region === 'commits' && i === current)); const a = document.querySelector('#stepper .step.qcur'); if (a) a.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
@@ -990,9 +992,9 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   function pageCursor(dir) {
     const cur = current_(); const y = cur ? cur.getBoundingClientRect().top : 160;
     // Step by the area left under the sticky page and file headers, keeping two lines of overlap, so no line is skipped.
-    const fh = document.querySelector('#files .file-head'), cover = document.getElementById('top').offsetHeight + (fh ? fh.offsetHeight : 0);
+    const cover = coverTop();
     window.scrollBy(0, dir * Math.max(120, window.innerHeight - cover - 44)); lastCmt = null;
-    const list = stops(); if (list.length) setCursor(nearestStop(list, Math.max(160, Math.min(y, window.innerHeight - 80))), false);
+    const list = stops(); if (list.length) setCursor(nearestStop(list, Math.max(cover + 12, Math.min(y, window.innerHeight - 80))), false);
   }
   // Shift + j / l (or Shift + Up / Down, or Shift + click on a line's button) picks a range of lines in one file and side;
   // k, i and m then open one multi-line comment or request whose start line is the top of the range.
