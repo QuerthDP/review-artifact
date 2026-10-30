@@ -357,7 +357,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     const ok = await writeThread(id, Object.assign({}, t, { shellThreadId, notifyError: shellThreadId ? null : notifyErr }), true);
     sending = false;
     if (ok) {
-      dropDraft(t.kind === 'feedback' ? 'fb' : 'a|' + draftKey(anchor)); openAsk = null; toast(shellThreadId || !notifyErr ? 'Sent to Claude' : 'Question saved');
+      dropDraft(t.kind === 'feedback' ? 'fb' : 'a|' + draftKey(anchor)); openAsk = null; renderAll(); toast(shellThreadId || !notifyErr ? 'Sent to Claude' : 'Question saved');
       // The feedback panel keeps unsent drafts across re-renders; a sent message must not come back.
       if (t.kind === 'feedback') { const ta = document.querySelector('#fb-panel #ask-ta'); if (ta) ta.value = ''; renderFeedback(); }
     }
@@ -500,7 +500,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   }
   async function saveEdit(id, body) {
     const ok = await write(id, { body, status: 'queued', editedByUser: true, syncPending: true, updatedAt: new Date().toISOString() }, false);
-    if (ok) { dropDraft('ta-' + id); editing = null; toast('Edited; updating your GitHub draft'); syncGitHub(comments[id] || { id }, 'edited by you'); }
+    if (ok) { dropDraft('ta-' + id); editing = null; renderAll(); toast('Edited; updating your GitHub draft'); syncGitHub(comments[id] || { id }, 'edited by you'); }
   }
   // Close the box as soon as a note is sent and ignore repeats while it is in flight, so one press sends it once.
   const notesInFlight = new Set();
@@ -522,7 +522,8 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     const conv = !!anchor.replyToConv; // PR conversation replies can't live in a pending review: they wait here until posted
     const doc = { commit: anchor.commit, path: anchor.path || null, line: anchor.line || null, side: anchor.side || null, startLine: anchor.startLine || null, replyTo: anchor.replyTo || null, replyToConv: anchor.replyToConv || null, convAuthor: anchor.convAuthor || null, body, author: 'user', status: 'queued', syncPending: !conv, createdAt: new Date().toISOString() };
     const ok = await write(id, doc, true);
-    if (ok) { dropDraft('c|' + draftKey(anchor)); openComposer = null; if (conv) toast('Queued; posted when you click "Post queued conversation replies"'); else { toast('Queued; adding to your GitHub draft'); syncGitHub(Object.assign({ id }, doc), 'new comment'); } }
+    // The write's own snapshot re-renders before the composer is cleared, so render again once it is closed.
+    if (ok) { dropDraft('c|' + draftKey(anchor)); openComposer = null; renderAll(); if (conv) toast('Queued; posted when you click "Post queued conversation replies"'); else { toast('Queued; adding to your GitHub draft'); syncGitHub(Object.assign({ id }, doc), 'new comment'); } }
   }
 
   // ---------- render ----------
