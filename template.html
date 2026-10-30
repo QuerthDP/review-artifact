@@ -51,6 +51,12 @@ tr.flash td { animation: flash 1.6s ease-out; }
 @media (prefers-reduced-motion: reduce) { tr.flash td { animation: none; } }
 .help { font-size: 12px; color: var(--muted); }
 .help kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--bg); }
+.linkbtn { background: none; border: 0; padding: 0; color: inherit; cursor: pointer; font-size: inherit; }
+.keyspanel { position: fixed; left: 16px; top: calc(var(--head-h, 60px) + 8px); width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - var(--head-h, 60px) - 24px); overflow: auto; z-index: 45; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.18); padding: 10px 12px; font-size: 13px; }
+.keyspanel h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 12px 0 4px; }
+.keyspanel dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
+.keyspanel dt { white-space: nowrap; } .keyspanel dd { margin: 0; }
+.keyspanel kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--bg); }
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
 .progress { font-size: 12px; color: var(--muted); }
 .progress b { color: var(--fg); }
@@ -238,8 +244,9 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     </div>
   </div>
   <div class="stepper" id="stepper" role="tablist"></div>
-  <div class="help"><kbd>[</kbd> <kbd>]</kbd> commit · <kbd>j</kbd> <kbd>l</kbd> line · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen · <kbd>n</kbd> <kbd>p</kbd> next / previous comment · <kbd>k</kbd> comment on line · <kbd>u</kbd> submit review · <kbd>f</kbd> feedback · <kbd>d</kbd> dismiss · <kbd>q</kbd> queue · <kbd>r</kbd> Reviewed by Human · <kbd>Esc</kbd> close · <kbd>h</kbd> show / hide queue · <kbd>i</kbd> ask Claude · <kbd>m</kbd> ask Claude to change · <kbd>Enter</kbd> expand / collapse · <kbd>Enter</kbd> in a text box sends · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line</div>
+  <div class="help"><button class="linkbtn" id="keyshint" aria-label="Show keyboard shortcuts"><kbd>t</kbd> keyboard shortcuts</button></div>
 </header>
+<div class="keyspanel" id="keys-panel" role="dialog" aria-label="Keyboard shortcuts" hidden><div class="fbpanel-head"><b>Keyboard shortcuts</b><span class="help"><kbd>t</kbd> or <kbd>Esc</kbd> closes</span></div><h3>Moving around</h3><dl><dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>Previous / next commit.</dd><dt><kbd>j</kbd> <kbd>l</kbd></dt><dd>Move the cursor up / down one line, hunk header, file header or comment card.</dd><dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Same as j / l; Up on the first line moves into the commit stepper, where Left / Right change commit and Down comes back to the diff.</dd><dt><kbd>PgUp</kbd> <kbd>PgDn</kbd></dt><dd>Scroll one screen, keeping two lines of overlap, and put the cursor on the line at the same height.</dd><dt><kbd>n</kbd> <kbd>p</kbd></dt><dd>Jump to the next / previous comment on the page (proposed, queued, reviewers' and conversations with Claude).</dd><dt><kbd>→</kbd> <kbd>←</kbd></dt><dd>Move into the queue panel / back to the diff. In the queue, Up / Down pick an item and Enter jumps to it.</dd><dt><kbd>h</kbd></dt><dd>Show or hide the queue panel.</dd></dl><h3>Commenting</h3><dl><dt><kbd>k</kbd></dt><dd>Write your own review comment on the selected line (or range). It is queued as yours and mirrored into your pending GitHub review.</dd><dt><kbd>Shift</kbd>+<kbd>j</kbd> <kbd>l</kbd> / <kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Select a range of lines in one file; k, i and m then act on the whole range. Shift+click on a line button does the same.</dd><dt><kbd>Enter</kbd></dt><dd>On a line: comment on it. On a hunk header: expand the hidden lines. On a file header: collapse / expand the file. On a card: reply, continue the conversation, or tell Claude how to revise its comment.</dd><dt><kbd>q</kbd></dt><dd>Queue the proposed Claude comment on the selected line or card.</dd><dt><kbd>d</kbd></dt><dd>Dismiss (or restore) what is selected: reject a proposed comment, close a conversation with Claude, or hide a reviewer thread.</dd><dt><kbd>r</kbd></dt><dd>Toggle "Reviewed by Human" on the selected Claude comment, after you have read its exact text.</dd><dt><kbd>u</kbd></dt><dd>Open the submit panel. Up / Down pick Comment, Approve or Request changes; Enter arms the button, Enter again submits.</dd></dl><h3>Asking Claude</h3><dl><dt><kbd>i</kbd></dt><dd>Ask Claude about the selected line or range; continues the conversation already open there. The answer stays on the page.</dd><dt><kbd>m</kbd></dt><dd>Ask Claude to change the code there: on your own PR Claude edits and commits locally, otherwise it drafts a suggestion comment.</dd><dt><kbd>f</kbd></dt><dd>Open the feedback panel to report a problem with this tool; j / l and Enter move through it.</dd></dl><h3>Text boxes and panels</h3><dl><dt><kbd>Enter</kbd></dt><dd>In a text box: send.</dd><dt><kbd>Shift</kbd>+<kbd>Enter</kbd></dt><dd>In a text box: new line.</dd><dt><kbd>Esc</kbd></dt><dd>Leave the text box and close open panels, composers and selections (unsent text is kept as a draft).</dd><dt><kbd>t</kbd></dt><dd>Show or hide this list.</dd></dl></div>
 
 <main>
   <div class="col" id="col">
@@ -835,7 +842,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     ta.focus({ preventScroll: true }); ta.setSelectionRange(pos, pos);
   }
   // Esc leaves every text box too: forget the remembered one so the re-render does not focus it again.
-  function closeAll() { clearSel(); lsSet('focus', ''); const a = document.activeElement; if (a && a.blur && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')) a.blur(); openComposer = null; openAsk = null; editing = null; fbOpen = false; showFbDone = false; fbCur = Infinity; subOpen = false; renderSubmit(); renderAll(); }
+  function closeAll() { showKeys(false); clearSel(); lsSet('focus', ''); const a = document.activeElement; if (a && a.blur && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')) a.blur(); openComposer = null; openAsk = null; editing = null; fbOpen = false; showFbDone = false; fbCur = Infinity; subOpen = false; renderSubmit(); renderAll(); }
   // Submitting the review is the viewer's explicit, two-click action; Claude performs it on GitHub when notified.
   let subOpen = false;
   function toggleSubmit() { subOpen = !subOpen; if (subOpen && fbOpen) { fbOpen = false; renderFeedback(); } renderSubmit(); }
@@ -1104,6 +1111,9 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     for (const one of sels) { b = scope.map(x => x.querySelector(one)).find(Boolean); if (b) break; }
     if (b) b.click(); else toast(none);
   }
+  // t shows the full list of keys, so the header carries only the hint.
+  function showKeys(on) { const p = document.getElementById('keys-panel'); if (!p) return; p.hidden = !on; if (on) { const b = document.getElementById('keyshint'); if (b) p.style.top = Math.round(b.getBoundingClientRect().bottom + 6) + 'px'; } }
+  document.getElementById('keyshint').onclick = () => showKeys(document.getElementById('keys-panel').hidden);
   document.addEventListener('keydown', e => {
     if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') {
       // Enter sends, Shift+Enter starts a new line.
@@ -1128,7 +1138,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
       ']': () => go(current + 1), '[': () => go(current - 1), ArrowRight: () => toQueue(), ArrowLeft: () => toDiff(),
       j: () => moveCursor(-1), ArrowUp: () => region === 'queue' ? moveQ(-1) : arrowMove(-1), l: () => moveCursor(1), ArrowDown: () => region === 'queue' ? moveQ(1) : arrowMove(1),
       PageUp: () => pageCursor(-1), PageDown: () => pageCursor(1),
-      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), f: () => toggleFeedback(), d: () => cardAction(['[data-act="dismiss"], .chat [data-act="restore"]', '[data-act="reject"], .card > .actions [data-act="restore"]', '[data-act="hidedisc"], [data-act="showdisc"]'], 'Nothing to dismiss here'), q: () => cardAction('[data-act="approve"]', 'No proposed comment to queue here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), Enter: () => enterCursor()
+      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), t: () => showKeys(document.getElementById('keys-panel').hidden), f: () => toggleFeedback(), d: () => cardAction(['[data-act="dismiss"], .chat [data-act="restore"]', '[data-act="reject"], .card > .actions [data-act="restore"]', '[data-act="hidedisc"], [data-act="showdisc"]'], 'Nothing to dismiss here'), q: () => cardAction('[data-act="approve"]', 'No proposed comment to queue here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), Enter: () => enterCursor()
     };
     const act = keys[e.key] || (e.key.length === 1 ? keys[e.key.toLowerCase()] : null);
     if (act) { e.preventDefault(); if (e.key.length === 1) toDiff(); act(); }
