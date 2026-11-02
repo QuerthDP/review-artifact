@@ -1323,13 +1323,21 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   window.claude && window.claude.use && window.claude.use('db').then(ns => {
     db = ns;
     if (!db) { document.getElementById('dbbanner').hidden = false; dbReady = true; renderQueue(); return; }
+    // A rebuild after a rebase changes the commit hashes, so a doc anchored to
+    // a hash no longer in the series moves (in memory only) to the latest
+    // commit touching its file, or to the last commit, instead of vanishing.
+    const reanchor = x => {
+      if (!x.commit || COMMITS.some(c => c.sha === x.commit)) return x;
+      const hit = x.path ? [...COMMITS].reverse().find(c => (c.files || []).some(f => f.path === x.path)) : null;
+      return Object.assign(x, { staleCommit: x.commit, commit: (hit || COMMITS[COMMITS.length - 1]).sha });
+    };
     db.collection('comments').onSnapshot(snap => {
       // Tombstones (deleted while in the GitHub draft) wait for the sync, hidden.
-      const next = {}; snap.docs.forEach(d => { if (d.exists && !d.data().deleted) next[d.id] = Object.assign({ id: d.id }, d.data()); });
+      const next = {}; snap.docs.forEach(d => { if (d.exists && !d.data().deleted) next[d.id] = reanchor(Object.assign({ id: d.id }, d.data())); });
       comments = next; dbReady = true; renderAll(); restorePos();
     }, err => { document.getElementById('dbbanner').hidden = false; dbReady = true; renderQueue(); });
     db.collection('threads').onSnapshot(snap => {
-      const next = {}; snap.docs.forEach(d => { if (d.exists) next[d.id] = Object.assign({ id: d.id }, d.data()); });
+      const next = {}; snap.docs.forEach(d => { if (d.exists) next[d.id] = reanchor(Object.assign({ id: d.id }, d.data())); });
       threads = next; renderAll(); restorePos();
     }, err => {});
   });
