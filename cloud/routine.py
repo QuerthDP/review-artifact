@@ -41,6 +41,20 @@ print(json.dumps({
          'url': 'https://api.anthropic.com/v1/code/mcp/meta'}],
     'job_config': {'ccr': {'environment_id': a.env, 'session_context': {
         'model': a.model, 'sources': sources,
-        'allowed_tools': ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'ToolSearch', 'Agent', 'Artifact', 'ArtifactComments', 'ArtifactData']},
+        'allowed_tools': ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'ToolSearch', 'Agent', 'Artifact', 'ArtifactComments', 'ArtifactData',
+                          'ReadNotifications', 'PushNotification', 'TodoWrite', 'WebFetch', 'WebSearch'],
+        # The auto-mode classifier refuses writes it cannot tie to the user's intent; these are the user's standing grants.
+        'auto_mode_environment': [
+            f'An ephemeral cloud sandbox run for {login}, who started it to review {repo}#{pr} on a claude.ai review page.',
+            f'QuerthDP/review-artifact is the review tool this session runs; {login} maintains it and wants fixes pushed straight to its main branch.'
+            + (f' {fork} is {login}\'s own fork of {repo}.' if has_fork else '')],
+        'auto_mode_allow': [
+            'Commit to QuerthDP/review-artifact and push to its main branch (pull and rebase first), after feedback from the review page asks for a fix of the tool.',
+            'Create, comment on and close issues on QuerthDP/review-artifact.',
+            f'Create, edit and delete comments of {login}\'s pending review on {repo}#{pr}, and submit that review when the page asks to.',
+            'Publish and republish the review page artifact, write its database and resolve its comment threads.',
+            'Call add_repo with push access for QuerthDP/review-artifact, the reviewed repository and the user\'s fork of it.',
+            'Delete or disable the routine that started this session and other routines targeting it, once the PR is closed.']
+            + ([f'Force-push with lease the branch review/pr-{pr} to {fork}, after the user clicked Accept on a proposed change on the review page. Never push to {repo}.'] if has_fork else [])},
         'events': [{'data': {'uuid': str(uuid.uuid4()), 'session_id': '', 'type': 'user', 'parent_tool_use_id': None,
                              'message': {'role': 'user', 'content': prompt}}}]}}}, indent=1))
