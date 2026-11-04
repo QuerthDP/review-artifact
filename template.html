@@ -721,7 +721,15 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
     const acc = PR_MINE ? Object.values(changes).filter(x => x.status === 'accepted') : [];
     el.hidden = !acc.length; if (!acc.length) { el.innerHTML = ''; return; }
     const last = acc.slice().sort((a, b) => String(b.at || b.decidedAt || '').localeCompare(String(a.at || a.decidedAt || '')))[0];
-    el.innerHTML = acc.length + ' accepted change' + (acc.length > 1 ? 's' : '') + ' on <code>' + esc(last.branch || 'the review branch') + '</code>, not on the PR yet' + (last.compareUrl ? ' · <a href="' + esc(last.compareUrl) + '" target="_blank" rel="noopener">Compare</a>' : '');
+    el.innerHTML = acc.length + ' accepted change' + (acc.length > 1 ? 's' : '') + ' on <code>' + esc(last.branch || 'the review branch') + '</code>, not on the PR yet' + (last.compareUrl ? ' · <a href="' + esc(last.compareUrl) + '" target="_blank" rel="noopener">Compare</a>' : '') + ' <button class="btn small" id="pushpr" title="Claude force-pushes the review branch onto the PR branch on your fork; never to the upstream repo">Push to the PR</button>';
+    // Two clicks: the second one is the authorization to rewrite the PR branch on the fork.
+    const b = el.querySelector('#pushpr');
+    b.onclick = async () => {
+      if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Click again: force-push the review branch to the PR'; return; }
+      b.disabled = true; b.textContent = 'Sent to Claude';
+      const sid = await notifyClaude({ id: 'push-' + Date.now().toString(36) }, (last.branch || 'review branch') + ' (' + acc.map(x => x.id).join(', ') + ')', el, 'push review branch');
+      toast(sid ? 'Sent to Claude to push to the PR' : 'Could not notify Claude: ask in chat to push the review branch');
+    };
   }
 
   function composer(anchor) {

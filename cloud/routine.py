@@ -29,7 +29,9 @@ prompt = open(f'{HERE}/prompt.md').read()
 for k, v in {'MODE': mode.strip(), 'REPO': repo, 'REPO_NAME': repo.split('/')[1], 'PR': str(pr),
              'PR_URL': f'https://github.com/{repo}/pull/{pr}', 'LOGIN': login, 'FORK': fork if has_fork else '(none: the user has no fork of this repo)', 'BADGES_JSON': json.dumps(badges)}.items():
     prompt = prompt.replace('{{%s}}' % k, v)
-sources = [{'git_repository': {'url': f'https://github.com/{r}'}} for r in dict.fromkeys([repo, 'QuerthDP/review-artifact'] + ([fork] if has_fork else []))]
+# On the user's own PR the fork is attached in place of the upstream repo: the sandbox can push only to attached repos, and
+# both cannot be attached together. The upstream PR is still read over the public API and fetched with pull/<N>/head.
+sources = [{'git_repository': {'url': f'https://github.com/{r}'}} for r in dict.fromkeys([fork if has_fork else repo, 'QuerthDP/review-artifact'])]
 # Hourly fires wake the persistent session so it can rebuild the page after a push.
 minute = datetime.datetime.now(datetime.timezone.utc).minute
 print(json.dumps({
@@ -55,6 +57,6 @@ print(json.dumps({
             'Publish and republish the review page artifact, write its database and resolve its comment threads.',
             'Call add_repo with push access for QuerthDP/review-artifact, the reviewed repository and the user\'s fork of it.',
             'Delete or disable the routine that started this session and other routines targeting it, once the PR is closed.']
-            + ([f'Force-push with lease the branch review/pr-{pr} to {fork}, after the user clicked Accept on a proposed change on the review page. Never push to {repo}.'] if has_fork else [])},
+            + ([f'Force-push with lease the branch review/pr-{pr} to {fork}, after the user clicked Accept on a proposed change on the review page.', f'Force-push with lease review/pr-{pr} onto the PR head branch on {fork}, after the user clicked "Push to the PR" twice on the review page.', f'Never push to {repo} or any repository of its owner.'] if has_fork else [])},
         'events': [{'data': {'uuid': str(uuid.uuid4()), 'session_id': '', 'type': 'user', 'parent_tool_use_id': None,
                              'message': {'role': 'user', 'content': prompt}}}]}}}, indent=1))
