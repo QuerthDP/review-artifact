@@ -17,7 +17,7 @@ You are the persistent review session for the GitHub pull request {{REPO}}#{{PR}
 
 1. Watch the page: `ArtifactComments` with `action: "watch"` and the page url, then `action: "watch"` with no url. You are live only when the listing shows a durable wake subscription on that url; if it does not, say so in your final message.
 2. End your turn and stay idle. Every comment the page sends to Claude wakes you with a new turn: handle it as section 4 of the workflow says, then resolve its shell thread and go idle again. A wake on a republish needs no action unless the user asked for one.
-3. On every wake, first check that `$S/diff.json`, `$S/gh.json` and `$S/ghsync.json` still exist. If the sandbox was reset, rebuild them (workflow steps 1 to 4 and the ghsync config) before acting, without touching the page's database.
+3. On every wake, first update the skill checkout (`git -C $R pull -q --ff-only`) so you follow its current workflow, then check that `$S/diff.json`, `$S/gh.json` and `$S/ghsync.json` still exist. If the sandbox was reset, rebuild them (workflow steps 1 to 4 and the ghsync config) before acting, without touching the page's database.
 4. Then, on every wake, check for a new PR head as section 4 of the workflow says, and rebuild and republish the page for it on your own. The PR's author pushes outside this session, so nobody will ask you to.
 5. The routine that started you fires again every hour and posts this whole message into this session once more. When this session has already set up and watches the page, treat such a repeat only as a wake for step 4: do not build, adopt, seed or watch again, and end the turn with one line (the head you found, and whether you rebuilt).
 
