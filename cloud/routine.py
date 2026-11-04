@@ -26,9 +26,10 @@ for k, v in {'MODE': mode.strip(), 'REPO': repo, 'REPO_NAME': repo.split('/')[1]
              'PR_URL': f'https://github.com/{repo}/pull/{pr}', 'LOGIN': login, 'BADGES_JSON': json.dumps(badges)}.items():
     prompt = prompt.replace('{{%s}}' % k, v)
 sources = [{'git_repository': {'url': f'https://github.com/{r}'}} for r in dict.fromkeys([repo, 'QuerthDP/review-artifact'])]
-when = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
+# Hourly fires wake the persistent session so it can rebuild the page after a push.
+minute = datetime.datetime.now(datetime.timezone.utc).minute
 print(json.dumps({
-    'name': f'review {repo}#{pr}', 'run_once_at': when, 'enabled': True, 'persist_session': True,
+    'name': f'review {repo}#{pr}', 'cron_expression': f'{minute} * * * *', 'enabled': True, 'persist_session': True,
     'mcp_connections': [
         {'connector_uuid': a.connector, 'name': 'Github-CoPilot', 'url': 'https://api.githubcopilot.com/mcp'},
         # the session registers its durable page watch through this one
