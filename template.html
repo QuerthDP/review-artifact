@@ -321,6 +321,7 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
     }
     return d;
   }
+  function cleanTextOf(h) { const d = document.createElement('div'); d.innerHTML = cleanHTML(h || ''); return (d.textContent || '').replace(/\s+/g, ' ').trim(); }
   function ghAt(sha, path, refs) { return GH.threads.filter(t => t.commit === sha && t.path === path && (refs ? refs.some(r => t.line === r.line && t.side === r.side) : !t.line)); }
   const PR_MINE = __PR_MINE__; // the viewer authored the PR: change requests edit and commit locally instead of suggesting
   const REPO = 'https://github.com/__REPO_SLUG__', REPO_SLUG = '__REPO_SLUG__', PR_NUMBER = __PR_NUMBER__;
@@ -658,9 +659,9 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
   }
   const changesAt = (sha, path, refs) => Object.values(changes).filter(x => x.status !== 'landed' && x.commit === sha && x.path === path && x.line && (!refs || refs.some(r => x.line === r.line && (x.side || 'RIGHT') === r.side)));
   // Jump to a card or row by id, on its own commit, unfolding its file.
-  function jumpTo(sha, id) {
+  function jumpTo(sha, id, fallbacks) {
     const ci = COMMITS.findIndex(c => c.sha === sha); if (ci >= 0 && ci !== current) go(ci);
-    setTimeout(() => { const el = document.getElementById(id); if (!el) { toast('Not shown in this view'); return; } const sec = el.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; const tg = sec.querySelector('[data-toggle]'); if (tg) tg.textContent = '▾'; } setCursor(el, false); el.scrollIntoView({ block: 'center' }); flashRow(el); }, 0);
+    setTimeout(() => { let el = document.getElementById(id); if (!el && fallbacks) { for (const f of fallbacks) if ((el = document.getElementById(f))) { toast('Line not in this diff; showing its file'); break; } } if (!el) { toast('Not shown in this view'); return; } if (el.tagName === 'DETAILS') el.open = true; const sec = el.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; const tg = sec.querySelector('[data-toggle]'); if (tg) tg.textContent = '▾'; } setCursor(el, false); el.scrollIntoView({ block: 'center' }); flashRow(el); }, 0);
   }
   function miniDiff(ch) {
     const lang = langOf(ch.path || ''), o = ch.old || [], n = ch.new || [];
@@ -954,6 +955,19 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
         const ci = COMMITS.findIndex(c => c.sha === x.commit), b = document.createElement('button'); b.className = 'qitem';
         b.innerHTML = '<div class="where">' + (ci + 1) + ' · ' + esc((x.path || '') + lineLabel(x)) + (x.status === 'failed' ? ' · failed' : '') + '</div><div class="snip">' + esc(String(x.reason || (x.new || [])[0] || '').split('\n')[0]) + '</div>';
         b.onclick = () => jumpTo(x.commit, 'chg-' + x.id); g.appendChild(b);
+      });
+      el.appendChild(g);
+    }
+    const ghT = GH.threads.filter(t => COMMITS.some(c => c.sha === t.commit)).sort((a, b) => !!a.resolved - !!b.resolved || COMMITS.findIndex(c => c.sha === a.commit) - COMMITS.findIndex(c => c.sha === b.commit) || (a.path || '').localeCompare(b.path || '') || (a.line || 0) - (b.line || 0));
+    if (ghT.length) {
+      const g = document.createElement('div'); g.className = 'qgroup'; const nOpen = ghT.filter(t => !t.resolved).length;
+      g.innerHTML = '<h3><span class="pill rejected">' + ghT.length + '</span>Reviewer threads · ' + nOpen + ' open</h3>';
+      ghT.forEach(t => {
+        const ci = COMMITS.findIndex(c => c.sha === t.commit), f = t.comments[0] || {}, b = document.createElement('button'); b.className = 'qitem';
+        const txt = String(f.body || f.text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() || (cleanTextOf(f.html));
+        b.innerHTML = '<div class="where">' + (ci + 1) + ' · ' + esc(f.author || '') + ' · ' + esc((t.path || 'commit-level') + lineLabel(t)) + ' <span class="pill ' + (t.resolved ? 'rejected">resolved' : 'proposed">open') + '</span></div><div class="snip">' + esc(txt.length > 80 ? txt.slice(0, 80) + '…' : txt) + '</div>';
+        b.onclick = () => jumpTo(t.commit, 'ghs-' + t.id, (t.path ? [fileId(ci, t.path) + '-head'] : []).concat('commit'));
+        g.appendChild(b);
       });
       el.appendChild(g);
     }
