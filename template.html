@@ -730,15 +730,7 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
     const acc = PR_MINE ? Object.values(changes).filter(x => x.status === 'accepted') : [];
     el.hidden = !acc.length; if (!acc.length) { el.innerHTML = ''; return; }
     const last = acc.slice().sort((a, b) => String(b.at || b.decidedAt || '').localeCompare(String(a.at || a.decidedAt || '')))[0];
-    el.innerHTML = acc.length + ' accepted change' + (acc.length > 1 ? 's' : '') + ' on <code>' + esc(last.branch || 'the review branch') + '</code>, not on the PR yet' + (last.compareUrl ? ' · <a href="' + esc(last.compareUrl) + '" target="_blank" rel="noopener">Compare</a>' : '') + (acc.some(x => x.applied === false) ? ' · applying ' + acc.filter(x => x.applied === false).length + '…' : ' <button class="btn small" id="pushpr" title="Claude force-pushes the review branch onto the PR branch on your fork; never to the upstream repo">Push to the PR</button>');
-    // Two clicks: the second one is the authorization to rewrite the PR branch on the fork.
-    const b = el.querySelector('#pushpr'); if (!b) return;
-    b.onclick = async () => {
-      if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Click again: force-push the review branch to the PR'; return; }
-      b.disabled = true; b.textContent = 'Sent to Claude';
-      const sid = await notifyClaude({ id: 'push-' + Date.now().toString(36) }, (last.branch || 'review branch') + ' (' + acc.map(x => x.id).join(', ') + ')', el, 'push review branch');
-      toast(sid ? 'Sent to Claude to push to the PR' : 'Could not notify Claude: ask in chat to push the review branch');
-    };
+    el.innerHTML = acc.length + ' accepted change' + (acc.length > 1 ? 's' : '') + ' on <code>' + esc(last.branch || 'the review branch') + '</code>, not on the PR yet' + (last.compareUrl ? ' · <a href="' + esc(last.compareUrl) + '" target="_blank" rel="noopener">Compare</a>' : '') + (acc.some(x => x.applied === false) ? ' · applying ' + acc.filter(x => x.applied === false).length + '…' : ' · <b>Push to the PR</b> when you approve');
   }
 
   function composer(anchor) {
@@ -1059,12 +1051,15 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
   let subOpen = false;
   function toggleSubmit() { subOpen = !subOpen; if (subOpen && fbOpen) { fbOpen = false; renderFeedback(); } renderSubmit(); }
   document.getElementById('submitrev').onclick = toggleSubmit;
+  // On the viewer's own PR there is nothing to approve: the header action pushes the approved review branch instead.
+  if (PR_MINE) { const sb = document.getElementById('submitrev'); sb.textContent = 'Push to the PR'; sb.setAttribute('aria-label', 'Push the review branch to the PR'); }
   function renderSubmit() {
     const old = document.getElementById('sub-panel'); const keep = old ? { body: old.querySelector('#sub-body').value, ev: (old.querySelector('input[name=subev]:checked') || {}).value } : null;
     if (old) old.remove(); if (!subOpen) return;
     const all = Object.values(comments);
     const queued = all.filter(x => x.status === 'queued' && !x.replyToConv), atSubmit = queued.filter(x => x.deferred).length, inDraft = queued.length - atSubmit, conv = all.filter(x => x.status === 'queued' && x.replyToConv).length, syncing = all.filter(x => x.syncPending).length;
     const p = document.createElement('div'); p.id = 'sub-panel'; p.className = 'fbpanel';
+    if (PR_MINE) { renderPushPanel(p, queued.length, conv, syncing); return; }
     p.innerHTML = '<div class="fbpanel-head"><b>Submit your review</b><button class="btn small" aria-label="Close">✕</button></div>' +
       '<div class="hint">' + inDraft + ' comment' + (inDraft === 1 ? '' : 's') + ' in your pending GitHub review' + (atSubmit ? ' + ' + atSubmit + ' added at submit' : '') + (syncing ? ' · ' + syncing + ' still syncing' : '') + '. Submitting makes them public.</div>' +
       '<textarea id="sub-body" placeholder="Review summary (optional)"></textarea>' +
@@ -1093,6 +1088,31 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
       if (sent || !notifyErr) dropDraft('sub-body'); subOpen = false; renderSubmit(); toast(sent || !notifyErr ? 'Sent to Claude: submitting your review' : 'Claude was not notified; tell Claude in chat to submit');
     };
     document.body.appendChild(p); placePanels(); restoreDrafts(); saveUi(); setTimeout(() => p.querySelector('#sub-body').focus(), 0);
+  }
+  // Own PR: force-push the review branch (every accepted change) onto the PR branch on the fork, and post queued replies with it.
+  function renderPushPanel(p, nQueued, conv, syncing) {
+    const acc = Object.values(changes).filter(x => x.status === 'accepted'), applying = acc.filter(x => x.applied === false).length;
+    const br = esc((acc.find(x => x.branch) || {}).branch || 'review/pr-' + PR_NUMBER), posts = nQueued + conv;
+    p.innerHTML = '<div class="fbpanel-head"><b>Push to the PR</b><button class="btn small" aria-label="Close">✕</button></div>' +
+      '<div class="hint">' + (acc.length ? acc.length + ' accepted change' + (acc.length === 1 ? '' : 's') + ' on <code>' + br + '</code>' + (applying ? ' · ' + applying + ' still applying' : '') + '; Claude force-pushes it onto the PR branch on your fork (never upstream).' : 'No accepted changes to push.') + (posts ? ' ' + posts + ' queued repl' + (posts === 1 ? 'y is' : 'ies are') + ' posted with it.' : '') + (syncing ? ' ' + syncing + ' still syncing.' : '') + '</div>' +
+      (posts ? '<textarea id="sub-body" placeholder="Comment posted with the replies (optional)"></textarea>' : '<textarea id="sub-body" hidden></textarea>') +
+      '<div class="actions"><button class="btn primary small" id="sub-go"' + ((!acc.length && !posts) || applying ? ' disabled' : '') + '>Push to the PR</button><button class="btn small" id="sub-cancel">Cancel</button></div>';
+    p.querySelector('.fbpanel-head button').onclick = p.querySelector('#sub-cancel').onclick = () => { subOpen = false; renderSubmit(); };
+    const go = p.querySelector('#sub-go');
+    go.onclick = async () => {
+      if (!go.dataset.armed) { go.dataset.armed = '1'; go.textContent = acc.length ? 'Click again: force-push to the PR' : 'Click again: post publicly'; return; }
+      go.disabled = true; const body = p.querySelector('#sub-body').value.trim();
+      if (acc.length) {
+        const sid = await notifyClaude({ id: 'push-' + Date.now().toString(36) }, br + ' (' + acc.map(x => x.id).join(', ') + ')', document.getElementById('submitrev'), 'push review branch');
+        toast(sid || !notifyErr ? 'Sent to Claude: pushing the review branch to the PR' : 'Claude was not notified; ask in chat to push the review branch');
+      }
+      if (posts) {
+        if (mcp && !syncing) { try { const failed = await submitDirect('COMMENT', body, true); ghStatus(failed ? failed + ' repl' + (failed === 1 ? 'y' : 'ies') + ' not posted (see the GitHub error pill)' : 'Replies posted on GitHub', REPO + '/pull/' + PR_NUMBER, failed ? 0 : 6000); } catch (e) { toast('GitHub call failed; asking Claude to post'); await notifyClaude({ id: 'submit-' + Date.now().toString(36) }, 'event=COMMENT postConversationReplies=yes\n' + body, document.getElementById('submitrev'), 'submit review'); } }
+        else await notifyClaude({ id: 'submit-' + Date.now().toString(36) }, 'event=COMMENT postConversationReplies=yes\n' + body, document.getElementById('submitrev'), 'submit review');
+      }
+      dropDraft('sub-body'); subOpen = false; renderSubmit();
+    };
+    document.body.appendChild(p); placePanels(); restoreDrafts(); saveUi(); setTimeout(() => (posts ? p.querySelector('#sub-body') : go).focus(), 0);
   }
   function stepReviewType(dir) {
     const rs = Array.from(document.querySelectorAll('#sub-panel input[name=subev]')); if (!rs.length) return;
