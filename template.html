@@ -403,7 +403,7 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
     const where = anchor.path ? anchor.path + lineLabel(anchor) : 'commit ' + COMMITS[anchor.commitIdx].short;
     const mod = anchor.kind === 'modify', fb = anchor.kind === 'feedback';
     const hint = fb ? 'Claude writes it up and files an issue on <a href="https://github.com/' + FEEDBACK_REPO + '" target="_blank" rel="noopener">' + FEEDBACK_REPO + '</a>, then replies here with the issue link' : mod ? 'Ask Claude to change · ' + esc(where) + ' · ' + (PR_MINE ? 'Claude proposes the change as a card; Accept folds it into the commit and pushes the review branch to your fork' : 'Claude proposes the change as a card; Accept queues it as a GitHub suggestion') : 'Ask Claude · ' + esc(where) + ' · the question and answer stay here on the page';
-    d.innerHTML = '<div class="hint">' + hint + '</div><textarea id="ask-ta" data-draft="' + (fb ? 'fb' : 'a|' + esc(draftKey(anchor))) + '" placeholder="' + (fb ? 'What bothers you about the tool, or what is missing?' : mod ? 'What should change here?' : 'What do you want to know about this code?') + '"></textarea><div class="actions"><button class="btn primary small" id="ask-send">' + (fb ? 'Send to Claude' : mod ? 'Ask Claude to change it' : 'Ask Claude') + '</button><button class="btn small" id="ask-cancel">Cancel</button></div>';
+    d.innerHTML = '<div class="hint">' + hint + '</div><textarea id="ask-ta" data-draft="' + (fb ? 'fb' : 'a|' + esc(draftKey(anchor))) + '" placeholder="' + (fb ? 'What bothers you about the tool, or what is missing?' : mod ? (anchor.path ? 'What should change here?' : 'Reword the message, drop the commit, or rework it as a whole?') : 'What do you want to know about this code?') + '"></textarea><div class="actions"><button class="btn primary small" id="ask-send">' + (fb ? 'Send to Claude' : mod ? 'Ask Claude to change it' : 'Ask Claude') + '</button><button class="btn small" id="ask-cancel">Cancel</button></div>';
     if (mod) d.style.borderColor = 'var(--proposed)';
     d.querySelector('#ask-send').onclick = () => { const v = d.querySelector('#ask-ta').value.trim(); if (v) sendQuestion(anchor, v, el); };
     d.querySelector('#ask-cancel').onclick = () => { dropDraft(fb ? 'fb' : 'a|' + draftKey(anchor)); openAsk = null; renderAll(); };
@@ -664,6 +664,13 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
     setTimeout(() => { let el = document.getElementById(id); if (!el && fallbacks) { for (const f of fallbacks) if ((el = document.getElementById(f))) { toast('Line not in this diff; showing its file'); break; } } if (!el) { toast('Not shown in this view'); return; } if (el.tagName === 'DETAILS') el.open = true; const sec = el.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; const tg = sec.querySelector('[data-toggle]'); if (tg) tg.textContent = '▾'; } setCursor(el, false); el.scrollIntoView({ block: 'center' }); flashRow(el); }, 0);
   }
   function miniDiff(ch) {
+    // A commit-level change (no path) rewords, drops or reworks the whole commit: old/new hold message lines, if any.
+    if (!ch.path) {
+      if (ch.action === 'drop') return '<div class="minidiff"><div class="md-n">(the commit is dropped)</div></div>';
+      const o = ch.old || [], n = ch.new || [];
+      if (!o.length && !n.length) return '';
+      return '<div class="minidiff">' + o.map(s => '<div class="md-d"><span class="marker">−</span>' + esc(s) + '</div>').join('') + n.map(s => '<div class="md-a"><span class="marker">+</span>' + esc(s) + '</div>').join('') + '</div>';
+    }
     const lang = langOf(ch.path || ''), o = ch.old || [], n = ch.new || [];
     return '<div class="minidiff">' + o.map(s => '<div class="md-d"><span class="marker">−</span>' + hl(s, lang) + '</div>').join('') + n.map(s => '<div class="md-a"><span class="marker">+</span>' + hl(s, lang) + '</div>').join('') + (n.length ? '' : '<div class="md-n">(the lines are deleted)</div>') + '</div>';
   }
@@ -742,6 +749,7 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
     const orphan = byCommit(c.sha).filter(x => x.path && !paths.has(x.path));
     g.innerHTML = '<h3>Commit-level comments and conversations</h3>';
     gen.forEach(x => g.appendChild(card(x)));
+    Object.values(changes).filter(x => x.status !== 'landed' && x.commit === c.sha && !x.path).forEach(x => g.appendChild(changeCard(x)));
     const h2 = el.querySelector('h2');
     threadsAt(c.sha, null, null).forEach(t => g.appendChild(threadCard(t, h2)));
     ghAt(c.sha, null, null).forEach(t => g.appendChild(ghThreadCard(t)));
@@ -771,6 +779,7 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
       const row = document.createElement('div'); row.className = 'actions';
       const b = document.createElement('button'); b.className = 'btn small'; b.textContent = '+ Queue a commit-level GitHub comment'; b.dataset.k = '1'; b.onclick = () => { openComposer = { commit: c.sha, commitIdx: current }; renderAll(); }; row.appendChild(b);
       const a = document.createElement('button'); a.className = 'btn small ask'; a.textContent = '? Ask Claude about this commit'; a.dataset.i = '1'; a.onclick = () => askAbout({ commit: c.sha, commitIdx: current }); row.appendChild(a);
+      const m = document.createElement('button'); m.className = 'btn small modbtn'; m.textContent = '✎ Ask Claude to change this commit'; m.dataset.m = '1'; m.title = 'Reword its message, drop it or rework it'; m.onclick = () => askAbout({ commit: c.sha, commitIdx: current, kind: 'modify' }); row.appendChild(m);
       g.appendChild(row);
     }
     // Every item of the commit-level section is a keyboard stop, before the files.
@@ -1309,7 +1318,7 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
       if (gt) { const gb = item.querySelector('.ghbody'); askAbout({ commit: gt.commit, commitIdx: current, path: gt.path || null, line: gt.line || null, side: gt.side || null, about: gt.id, aboutText: gb ? gb.textContent : '' }); return; }
     }
     const cur = lineOf(current_());
-    if (cur && cur.classList.contains('gstop')) { const b = document.querySelector(sel === '.askbtn' ? '#commit [data-i]' : sel === '.addbtn' ? '#commit [data-k]' : null); if (b) b.click(); else toast('Not available at commit level'); return; }
+    if (cur && cur.classList.contains('gstop')) { const b = document.querySelector(sel === '.askbtn' ? '#commit [data-i]' : sel === '.addbtn' ? '#commit [data-k]' : sel === '.modbtn' ? '#commit [data-m]' : null); if (b) b.click(); else toast('Not available at commit level'); return; }
     if (!cur || !cur.matches('tr.line')) { toast('Select a line first (j / l)'); return; }
     const rows = selRows(), row = rows ? rows[rows.length - 1] : cur;
     // i continues the conversation already open on this line (the selected one, else the latest) instead of starting another.
