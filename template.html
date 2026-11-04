@@ -101,7 +101,7 @@ header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 .ghthread > summary a { margin-left: auto; font-size: 12px; }
 .ghc { border-top: 1px solid var(--line-soft); padding: 6px 0; font-size: 13px; }
 .ghwho { font-size: 12px; color: var(--muted); } .ghwho b { color: var(--fg); }
-.ghbody { overflow-wrap: anywhere; } .ghbody img { max-width: 100%; height: auto; vertical-align: middle; } .ghbody pre { overflow-x: auto; } .ghbody details { margin: 4px 0; }
+.ghbody { overflow-wrap: anywhere; } .ghbody img { max-width: 100%; height: auto; vertical-align: middle; } .ghbody pre { overflow-x: auto; } .ghbody details { margin: 4px 0; } .ghbody .imgalt { display: inline-block; padding: 1px 6px; border: 1px solid currentColor; border-radius: 4px; font-size: 11px; opacity: .8; }
 .fbpanel { position: fixed; right: 16px; top: calc(var(--head-h, 60px) + 8px); width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - var(--head-h, 60px) - 24px); overflow: auto; z-index: 45; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.18); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .subev { display: flex; gap: 14px; font-size: 13px; } .subconv { font-size: 13px; }
 #sub-body { min-height: 70px; }
@@ -273,6 +273,15 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     const doc = new DOMParser().parseFromString('<div>' + (html || '') + '</div>', 'text/html');
     doc.querySelectorAll('script, style, iframe, object, embed, form, input, button, link, meta').forEach(n => n.remove());
     doc.querySelectorAll('*').forEach(n => Array.from(n.attributes).forEach(a => { if (/^on/i.test(a.name) || /^\s*javascript:/i.test(a.value)) n.removeAttribute(a.name); }));
+    // The page cannot load external images (badges, camo-proxied icons): show their alt text instead, drop decorative ones.
+    doc.querySelectorAll('picture source').forEach(n => n.remove());
+    doc.querySelectorAll('img').forEach(img => {
+      if (/^data:/i.test(img.getAttribute('src') || '')) return;
+      const alt = (img.getAttribute('alt') || '').trim();
+      if (!alt) { img.remove(); return; }
+      const s = doc.createElement('span'); s.className = 'imgalt'; s.textContent = alt; img.replaceWith(s);
+    });
+    doc.querySelectorAll('picture, themed-picture').forEach(n => { if (!n.textContent.trim() && !n.querySelector('img')) n.remove(); });
     doc.querySelectorAll('a').forEach(a => { a.target = '_blank'; a.rel = 'noopener'; });
     return doc.body.firstChild.innerHTML;
   }
@@ -388,7 +397,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
     const d = document.createElement('div'); d.className = 'chat'; d.id = 'chs-' + t.id;
     const msgs = (t.messages || []).map(m => '<div class="msg-row ' + m.role + '"><span class="who">' + (m.role === 'claude' ? 'Claude' : 'You') + '</span><div class="body">' + md(m.text) + '</div></div>').join('');
     const pending = t.status === 'asked' ? '<div class="pending">Waiting for Claude' + WAIT_DOTS + (t.shellThreadId || !t.notifyError ? '' : ' (not notified: tell Claude in chat to answer page questions)') + '</div>' : '';
-    d.innerHTML = '<div class="card-head"><b>' + (t.kind === 'modify' ? 'Change request to Claude' : t.kind === 'feedback' ? 'Feedback on the tool' : 'Conversation with Claude') + '</b>' + (t.path ? '' : '<span>commit-level</span>') + (t.dismissed ? '<span class="pill rejected">dismissed</span><button class="btn small dismiss" data-act="restore">Restore</button>' : t.status === 'answered' ? '<button class="btn small dismiss" data-act="dismiss" title="Hide this answered conversation; it can be restored from the queue">Dismiss</button>' : '') + '</div>' + msgs + pending + (t.commentId && comments[t.commentId] ? '<div class="made"><button class="btn small" data-act="gocomment">Go to the comment Claude drafted</button></div>' : '') + '<div class="followup"><textarea id="fu-' + t.id + '" placeholder="Follow up"></textarea><button class="btn small ask" data-act="followup">Send</button></div>';
+    d.innerHTML = '<div class="card-head"><b>' + (t.kind === 'modify' ? 'Change request to Claude' : t.kind === 'feedback' ? 'Feedback on the tool' : 'Conversation with Claude') + '</b>' + (t.path || t.kind === 'feedback' ? '' : '<span>commit-level</span>') + (t.dismissed ? '<span class="pill rejected">dismissed</span><button class="btn small dismiss" data-act="restore">Restore</button>' : t.status === 'answered' ? '<button class="btn small dismiss" data-act="dismiss" title="Hide this answered conversation; it can be restored from the queue">Dismiss</button>' : '') + '</div>' + msgs + pending + (t.commentId && comments[t.commentId] ? '<div class="made"><button class="btn small" data-act="gocomment">Go to the comment Claude drafted</button></div>' : '') + '<div class="followup"><textarea id="fu-' + t.id + '" placeholder="Follow up"></textarea><button class="btn small ask" data-act="followup">Send</button></div>';
     const gc = d.querySelector('[data-act="gocomment"]'); if (gc) gc.onclick = () => { const el = document.getElementById('cds-' + t.commentId); if (el) { setCursor(el, false); el.scrollIntoView({ block: 'center' }); flashRow(el); } };
     d.querySelector('[data-act="followup"]').onclick = () => { const ta = d.querySelector('#fu-' + t.id); const v = ta.value.trim(); if (v) sendFollowUp(t, v, el); };
     const dm = d.querySelector('[data-act="dismiss"], [data-act="restore"]');
@@ -414,7 +423,16 @@ body.nopointer, body.nopointer * { cursor: none !important; }
   function md(s) {
     // minimal: fenced code, inline code, line breaks
     let out = '', parts = String(s).split(/```/);
-    parts.forEach((p, i) => { out += (i % 2) ? '<pre>' + esc(p.replace(/^\w*\n/, '')) + '</pre>' : esc(p).replace(/`([^`]+)`/g, '<code>$1</code>'); });
+    // Inline: `code`, [text](https://...), bare http(s) links (clickable, new tab) and **bold**; code spans are left alone.
+    const link = (href, text) => '<a href="' + href + '" target="_blank" rel="noopener">' + text + '</a>';
+    const inline = t => esc(t).split(/(`[^`]+`)/).map((seg, j) => (j % 2) ? '<code>' + seg.slice(1, -1) + '</code>' : seg
+      .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/(?:(?!&quot;|&#39;)[^\s<])+)/g, (m0, text, href, bare) => {
+        if (!bare) return link(href, text);
+        const tail = bare.match(/[.,;:!?)\]]+$/), u = tail ? bare.slice(0, -tail[0].length) : bare;
+        return link(u, u) + (tail ? tail[0] : '');
+      })
+      .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')).join('');
+    parts.forEach((p, i) => { out += (i % 2) ? '<pre>' + esc(p.replace(/^\w*\n/, '')) + '</pre>' : inline(p); });
     return out;
   }
   // ---------- syntax highlighting and intra-line change marks ----------
@@ -830,7 +848,7 @@ body.nopointer, body.nopointer * { cursor: none !important; }
       convs.forEach(t => {
         const ci = COMMITS.findIndex(c => c.sha === t.commit); const first = (t.messages && t.messages[0] && t.messages[0].text) || '';
         const b = document.createElement('button'); b.className = 'qitem';
-        b.innerHTML = '<div class="where">' + (ci + 1) + ' · ' + esc(t.path ? t.path + (t.line ? ':' + t.line : '') : 'commit-level') + (t.status === 'asked' ? ' · waiting' : '') + '</div><div class="snip">' + esc(first.split('\n')[0]) + '</div>';
+        b.innerHTML = '<div class="where">' + (t.kind === 'feedback' ? 'feedback on the tool' : (ci + 1) + ' · ' + esc(t.path ? t.path + (t.line ? ':' + t.line : '') : 'commit-level')) + (t.status === 'asked' ? ' · waiting' : '') + '</div><div class="snip">' + esc(first.split('\n')[0]) + '</div>';
         b.onclick = () => { if (t.kind === 'feedback') { fbOpen = true; renderFeedback(); return; } go(ci); setTimeout(() => { const el = t.path && t.line ? document.querySelector('[data-ids~="' + rowId(ci, t.path, t.line, t.side || 'RIGHT') + '"]') : document.getElementById('commit'); if (el) { const sec = el.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; } el.scrollIntoView({ block: 'center' }); flashRow(el); } }, 0); };
         g.appendChild(b);
       });
