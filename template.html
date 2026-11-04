@@ -679,15 +679,24 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
     return '<div class="minidiff">' + o.map(s => '<div class="md-d"><span class="marker">−</span>' + hl(s, lang) + '</div>').join('') + n.map(s => '<div class="md-a"><span class="marker">+</span>' + hl(s, lang) + '</div>').join('') + (n.length ? '' : '<div class="md-n">(the lines are deleted)</div>') + '</div>';
   }
   const chgOpen = new Set(), chgBusy = new Set(); // settled cards the viewer unfolded; accepts in flight
-  // Accepting goes through Claude: on the viewer's PR it folds the change into the commit and pushes the review branch, otherwise it queues a suggestion.
+  // Accepting is instant: the card turns accepted and the overlay shows at once. On the viewer's PR, Claude then folds it onto the
+  // review branch in the background (applied: false until then); on others' PRs the page queues the suggestion itself.
   async function acceptChange(ch, el) {
     if (chgBusy.has(ch.id)) return; chgBusy.add(ch.id);
     try {
-      if (!await writeChange(ch.id, { status: 'accepting', decidedAt: new Date().toISOString(), error: null })) return;
+      const at = new Date().toISOString();
+      if (!PR_MINE) {
+        const cid = 'sugg_' + ch.id, fence = '```';
+        const body = (ch.reason || '') + (ch.path ? '\n\n' + fence + 'suggestion\n' + (ch.new || []).join('\n') + (ch.new && ch.new.length ? '\n' : '') + fence : ch.op === 'reword' ? '\n\nProposed commit message:\n\n' + String(ch.message || '').split('\n').map(l => '> ' + l).join('\n') : '\n\nThis commit could be dropped.');
+        const doc = { commit: ch.commit, path: ch.path || null, line: ch.line || null, side: ch.path ? (ch.side || 'RIGHT') : null, startLine: ch.startLine || null, body, author: 'claude', status: 'queued', syncPending: true, createdAt: at };
+        if (!await write(cid, doc, true)) return;
+        if (!await writeChange(ch.id, { status: 'accepted', decidedAt: at, commentId: cid, error: null })) return;
+        toast('Accepted; suggestion queued'); syncGitHub(Object.assign({ id: cid }, doc), 'new comment'); return;
+      }
+      if (!await writeChange(ch.id, { status: 'accepted', applied: false, decidedAt: at, error: null })) return;
+      toast('Accepted');
       const live = document.getElementById('chg-' + ch.id);
-      const sid = await notifyClaude(ch, ch.shellThreadId ? '[accept change ' + ch.id + ']' : PR_MINE ? (ch.path ? 'fold it into the commit' : ch.op === 'drop' ? 'drop the commit' : 'rewrite the commit message') + ' and push the review branch' : ch.path ? 'queue it as a GitHub suggestion' : 'queue it as a commit-level comment', live || el, 'accept change');
-      await writeChange(ch.id, { shellThreadId: sid || ch.shellThreadId || null, notifyError: sid || ch.shellThreadId ? null : notifyErr });
-      if (sid || ch.shellThreadId || !notifyErr) toast('Accepted; sent to Claude');
+      notifyClaude(ch, ch.shellThreadId ? '[accept change ' + ch.id + ']' : 'apply it on the review branch', live || el, 'accept change').then(sid => writeChange(ch.id, { shellThreadId: sid || ch.shellThreadId || null, notifyError: sid || ch.shellThreadId ? null : notifyErr }));
     } finally { chgBusy.delete(ch.id); }
   }
   function changeCard(ch) {
@@ -696,7 +705,7 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
     const title = st === 'accepted' ? '<b>Accepted</b>' : st === 'declined' ? '<b class="struck">Declined</b>' : st === 'stale' ? '<b>Not applied: the PR changed under it</b>' : ch.op === 'drop' && !ch.path ? '<b>Proposed: drop this commit</b>' : ch.op === 'reword' && !ch.path ? '<b>Proposed: new commit message</b>' : '<b>Proposed change</b>';
     const spill = st === 'accepting' ? '<span class="pill revise">accepting</span>' : st === 'failed' ? '<span class="pill warn">failed</span>' : st === 'proposed' ? '<span class="pill proposed">proposed</span>' : '';
     const sha = esc((ch.newCommit || '').slice(0, 10)), br = esc(ch.branch || 'the review branch');
-    const pill = st !== 'accepted' ? '' : !PR_MINE ? '<button class="pill queued linkbtn" data-act="gocomment" title="Go to the comment in your queue">' + (ch.path ? 'suggestion' : 'comment') + ' queued</button>' : ch.commitUrl ? '<a class="pill queued" href="' + esc(ch.commitUrl) + '" target="_blank" rel="noopener">' + (sha ? sha + ' on ' : 'on ') + br + '</a>' : '<span class="pill queued">' + (sha ? sha + ' on ' : 'on ') + br + '</span>';
+    const pill = st !== 'accepted' ? '' : PR_MINE && ch.applied === false ? '<span class="pill revise" title="Claude is putting it on the review branch; no need to wait">applying' + WAIT_DOTS + '</span>' : !PR_MINE ? '<button class="pill queued linkbtn" data-act="gocomment" title="Go to the comment in your queue">' + (ch.path ? 'suggestion' : 'comment') + ' queued</button>' : ch.commitUrl ? '<a class="pill queued" href="' + esc(ch.commitUrl) + '" target="_blank" rel="noopener">' + (sha ? sha + ' on ' : 'on ') + br + '</a>' : '<span class="pill queued">' + (sha ? sha + ' on ' : 'on ') + br + '</span>';
     const tip = PR_MINE ? (ch.path ? 'Claude folds it into the commit' : ch.op === 'drop' ? 'Claude drops the commit' : 'Claude rewrites the commit message') + ' and pushes the review branch to your fork' : ch.path ? 'Queues it as a GitHub suggestion in your pending review' : 'Queues it as a commit-level comment in your pending review';
     const acc = '<button class="btn primary small" data-act="accept" title="' + tip + '">' + (st === 'failed' ? 'Retry' : 'Accept') + '</button>', dec = '<button class="btn small" data-act="decline">Decline</button>';
     const acts = st === 'proposed' || st === 'failed' ? acc + dec : st === 'declined' ? '<button class="btn small" data-act="restorechg">Restore</button>' : st === 'stale' ? dec : '';
@@ -721,9 +730,9 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
     const acc = PR_MINE ? Object.values(changes).filter(x => x.status === 'accepted') : [];
     el.hidden = !acc.length; if (!acc.length) { el.innerHTML = ''; return; }
     const last = acc.slice().sort((a, b) => String(b.at || b.decidedAt || '').localeCompare(String(a.at || a.decidedAt || '')))[0];
-    el.innerHTML = acc.length + ' accepted change' + (acc.length > 1 ? 's' : '') + ' on <code>' + esc(last.branch || 'the review branch') + '</code>, not on the PR yet' + (last.compareUrl ? ' · <a href="' + esc(last.compareUrl) + '" target="_blank" rel="noopener">Compare</a>' : '') + ' <button class="btn small" id="pushpr" title="Claude force-pushes the review branch onto the PR branch on your fork; never to the upstream repo">Push to the PR</button>';
+    el.innerHTML = acc.length + ' accepted change' + (acc.length > 1 ? 's' : '') + ' on <code>' + esc(last.branch || 'the review branch') + '</code>, not on the PR yet' + (last.compareUrl ? ' · <a href="' + esc(last.compareUrl) + '" target="_blank" rel="noopener">Compare</a>' : '') + (acc.some(x => x.applied === false) ? ' · applying ' + acc.filter(x => x.applied === false).length + '…' : ' <button class="btn small" id="pushpr" title="Claude force-pushes the review branch onto the PR branch on your fork; never to the upstream repo">Push to the PR</button>');
     // Two clicks: the second one is the authorization to rewrite the PR branch on the fork.
-    const b = el.querySelector('#pushpr');
+    const b = el.querySelector('#pushpr'); if (!b) return;
     b.onclick = async () => {
       if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Click again: force-push the review branch to the PR'; return; }
       b.disabled = true; b.textContent = 'Sent to Claude';
