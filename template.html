@@ -242,6 +242,9 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
 .ovmark { font-family: var(--ui); font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: .02em; color: var(--amber-bd); }
 .chgbanner { margin-top: 6px; background: var(--amber-bg); border: 1px solid var(--amber-bd); border-radius: 6px; padding: 2px 10px; font-size: 12px; }
 .chgbanner code { font-family: var(--mono); font-size: 11px; }
+.minidiff.msgdiff div { font-family: var(--ui); white-space: pre-wrap; }
+#commit h2.ovdrop { text-decoration: line-through; text-decoration-color: var(--amber-bd); color: var(--muted); }
+.ovmsg { background: var(--amber-bg); border-left: 3px solid var(--amber-bd); border-radius: 4px; padding: 4px 10px; margin: 6px 0; font-size: 13px; white-space: pre-wrap; }
 .toast { position: fixed; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; box-shadow: var(--shadow); z-index: 20; }
 @media (prefers-reduced-motion: no-preference) { .toast { animation: fade .25s ease-out; } @keyframes fade { from { opacity: 0; transform: translate(-50%, 6px); } } }
 </style>
@@ -663,7 +666,15 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
     const ci = COMMITS.findIndex(c => c.sha === sha); if (ci >= 0 && ci !== current) go(ci);
     setTimeout(() => { let el = document.getElementById(id); if (!el && fallbacks) { for (const f of fallbacks) if ((el = document.getElementById(f))) { toast('Line not in this diff; showing its file'); break; } } if (!el) { toast('Not shown in this view'); return; } if (el.tagName === 'DETAILS') el.open = true; const sec = el.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; const tg = sec.querySelector('[data-toggle]'); if (tg) tg.textContent = '▾'; } setCursor(el, false); el.scrollIntoView({ block: 'center' }); flashRow(el); }, 0);
   }
+  // A change with no path acts on the whole commit: op "drop" removes it, op "reword" gives it a new message.
+  const chgWhere = ch => ch.path ? ch.path + lineLabel(ch) : 'commit ' + ((COMMITS.find(c => c.sha === ch.commit) || {}).short || String(ch.commit || '').slice(0, 10)) + (ch.op === 'drop' ? ' · drop' : ' · new message');
+  const commitChanges = sha => Object.values(changes).filter(x => x.commit === sha && !x.path && x.op && x.status !== 'landed');
   function miniDiff(ch) {
+    if (!ch.path && ch.op) {
+      const cm = COMMITS.find(c => c.sha === ch.commit) || {}, oldMsg = ch.oldMessage || [cm.subject, cm.body].filter(Boolean).join('\n\n');
+      if (ch.op === 'drop') return '<div class="minidiff msgdiff"><div class="md-d"><span class="marker">−</span>' + esc(cm.subject || oldMsg.split('\n')[0]) + '</div><div class="md-n">(the whole commit is dropped)</div></div>';
+      return '<div class="minidiff msgdiff">' + oldMsg.split('\n').map(l => '<div class="md-d"><span class="marker">−</span>' + esc(l) + '</div>').join('') + String(ch.message || '').split('\n').map(l => '<div class="md-a"><span class="marker">+</span>' + esc(l) + '</div>').join('') + '</div>';
+    }
     const lang = langOf(ch.path || ''), o = ch.old || [], n = ch.new || [];
     return '<div class="minidiff">' + o.map(s => '<div class="md-d"><span class="marker">−</span>' + hl(s, lang) + '</div>').join('') + n.map(s => '<div class="md-a"><span class="marker">+</span>' + hl(s, lang) + '</div>').join('') + (n.length ? '' : '<div class="md-n">(the lines are deleted)</div>') + '</div>';
   }
@@ -674,7 +685,7 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
     try {
       if (!await writeChange(ch.id, { status: 'accepting', decidedAt: new Date().toISOString(), error: null })) return;
       const live = document.getElementById('chg-' + ch.id);
-      const sid = await notifyClaude(ch, ch.shellThreadId ? '[accept change ' + ch.id + ']' : PR_MINE ? 'fold it into the commit and push the review branch' : 'queue it as a GitHub suggestion', live || el, 'accept change');
+      const sid = await notifyClaude(ch, ch.shellThreadId ? '[accept change ' + ch.id + ']' : PR_MINE ? (ch.path ? 'fold it into the commit' : ch.op === 'drop' ? 'drop the commit' : 'rewrite the commit message') + ' and push the review branch' : ch.path ? 'queue it as a GitHub suggestion' : 'queue it as a commit-level comment', live || el, 'accept change');
       await writeChange(ch.id, { shellThreadId: sid || ch.shellThreadId || null, notifyError: sid || ch.shellThreadId ? null : notifyErr });
       if (sid || ch.shellThreadId || !notifyErr) toast('Accepted; sent to Claude');
     } finally { chgBusy.delete(ch.id); }
@@ -682,17 +693,17 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
   function changeCard(ch) {
     const st = ch.status || 'proposed', d = document.createElement('div'); d.className = 'card change cs-' + st; d.id = 'chg-' + ch.id; d.dataset.chg = ch.id;
     const fold = st === 'accepted' || st === 'declined' || st === 'stale', folded = fold && !chgOpen.has(ch.id);
-    const title = st === 'accepted' ? '<b>Accepted</b>' : st === 'declined' ? '<b class="struck">Declined</b>' : st === 'stale' ? '<b>Not applied: the PR changed under it</b>' : '<b>Proposed change</b>';
+    const title = st === 'accepted' ? '<b>Accepted</b>' : st === 'declined' ? '<b class="struck">Declined</b>' : st === 'stale' ? '<b>Not applied: the PR changed under it</b>' : ch.op === 'drop' && !ch.path ? '<b>Proposed: drop this commit</b>' : ch.op === 'reword' && !ch.path ? '<b>Proposed: new commit message</b>' : '<b>Proposed change</b>';
     const spill = st === 'accepting' ? '<span class="pill revise">accepting</span>' : st === 'failed' ? '<span class="pill warn">failed</span>' : st === 'proposed' ? '<span class="pill proposed">proposed</span>' : '';
     const sha = esc((ch.newCommit || '').slice(0, 10)), br = esc(ch.branch || 'the review branch');
-    const pill = st !== 'accepted' ? '' : !PR_MINE ? '<button class="pill queued linkbtn" data-act="gocomment" title="Go to the suggestion in your queue">suggestion queued</button>' : ch.commitUrl ? '<a class="pill queued" href="' + esc(ch.commitUrl) + '" target="_blank" rel="noopener">' + (sha ? sha + ' on ' : 'on ') + br + '</a>' : '<span class="pill queued">' + (sha ? sha + ' on ' : 'on ') + br + '</span>';
-    const tip = PR_MINE ? 'Claude folds it into the commit and pushes the review branch to your fork' : 'Queues it as a GitHub suggestion in your pending review';
+    const pill = st !== 'accepted' ? '' : !PR_MINE ? '<button class="pill queued linkbtn" data-act="gocomment" title="Go to the comment in your queue">' + (ch.path ? 'suggestion' : 'comment') + ' queued</button>' : ch.commitUrl ? '<a class="pill queued" href="' + esc(ch.commitUrl) + '" target="_blank" rel="noopener">' + (sha ? sha + ' on ' : 'on ') + br + '</a>' : '<span class="pill queued">' + (sha ? sha + ' on ' : 'on ') + br + '</span>';
+    const tip = PR_MINE ? (ch.path ? 'Claude folds it into the commit' : ch.op === 'drop' ? 'Claude drops the commit' : 'Claude rewrites the commit message') + ' and pushes the review branch to your fork' : ch.path ? 'Queues it as a GitHub suggestion in your pending review' : 'Queues it as a commit-level comment in your pending review';
     const acc = '<button class="btn primary small" data-act="accept" title="' + tip + '">' + (st === 'failed' ? 'Retry' : 'Accept') + '</button>', dec = '<button class="btn small" data-act="decline">Decline</button>';
     const acts = st === 'proposed' || st === 'failed' ? acc + dec : st === 'declined' ? '<button class="btn small" data-act="restorechg">Restore</button>' : st === 'stale' ? dec : '';
     const toggle = fold ? '<button class="btn small" data-act="expand">' + (folded ? 'Show change' : 'Hide change') + '</button>' : '';
     const wait = st === 'accepting' ? '<div class="pending">Waiting for Claude' + WAIT_DOTS + (ch.shellThreadId || !ch.notifyError ? '' : ' (not notified: tell Claude in chat to apply accepted changes)') + '</div>' : '';
     const err = st === 'failed' && ch.error ? '<div class="note chgerr">' + md(ch.error) + '</div>' : '';
-    d.innerHTML = '<div class="card-head">' + title + spill + '<span>' + esc((ch.path || '') + lineLabel(ch)) + '</span>' + pill + toggle + (fold ? acts : '') + '</div>' + (folded ? '' : (ch.reason ? '<div class="body">' + md(ch.reason) + '</div>' : '') + miniDiff(ch) + err + wait + (!fold && acts ? '<div class="actions">' + acts + '</div>' : ''));
+    d.innerHTML = '<div class="card-head">' + title + spill + '<span>' + esc(chgWhere(ch)) + '</span>' + pill + toggle + (fold ? acts : '') + '</div>' + (folded ? '' : (ch.reason ? '<div class="body">' + md(ch.reason) + '</div>' : '') + miniDiff(ch) + err + wait + (!fold && acts ? '<div class="actions">' + acts + '</div>' : ''));
     d.addEventListener('click', e => {
       const b = e.target.closest && e.target.closest('[data-act]'), act = b && b.dataset.act; if (!act) return;
       const at = new Date().toISOString();
@@ -742,7 +753,15 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
     const orphan = byCommit(c.sha).filter(x => x.path && !paths.has(x.path));
     g.innerHTML = '<h3>Commit-level comments and conversations</h3>';
     gen.forEach(x => g.appendChild(card(x)));
-    const h2 = el.querySelector('h2');
+    const h2 = el.querySelector('h2'), cchg = commitChanges(c.sha);
+    cchg.forEach(x => g.appendChild(changeCard(x)));
+    // Accepted commit changes live on the review branch: strike the dropped commit, show the new message under the old one.
+    const acc = cchg.filter(x => x.status === 'accepted' || x.status === 'accepting');
+    acc.forEach(x => {
+      const prev = x.status === 'accepting' ? ' (accepting…)' : ' on ' + esc(x.branch || 'the review branch');
+      if (x.op === 'drop') { h2.classList.add('ovdrop'); h2.insertAdjacentHTML('afterend', '<div class="ovmsg"><span class="ovmark">dropped</span>' + prev + '</div>'); }
+      else if (x.op === 'reword') h2.insertAdjacentHTML('afterend', '<div class="ovmsg"><span class="ovmark">new message</span>' + prev + '\n' + esc(x.message || '') + '</div>');
+    });
     threadsAt(c.sha, null, null).forEach(t => g.appendChild(threadCard(t, h2)));
     ghAt(c.sha, null, null).forEach(t => g.appendChild(ghThreadCard(t)));
     if (GH.conversation.length) {
@@ -953,8 +972,8 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
       const g = document.createElement('div'); g.className = 'qgroup'; g.innerHTML = '<h3><span class="pill proposed">' + pendChg.length + '</span>Proposed changes</h3>';
       pendChg.forEach(x => {
         const ci = COMMITS.findIndex(c => c.sha === x.commit), b = document.createElement('button'); b.className = 'qitem';
-        b.innerHTML = '<div class="where">' + (ci + 1) + ' · ' + esc((x.path || '') + lineLabel(x)) + (x.status === 'failed' ? ' · failed' : '') + '</div><div class="snip">' + esc(String(x.reason || (x.new || [])[0] || '').split('\n')[0]) + '</div>';
-        b.onclick = () => jumpTo(x.commit, 'chg-' + x.id); g.appendChild(b);
+        b.innerHTML = '<div class="where">' + (ci + 1) + ' · ' + esc(chgWhere(x)) + (x.status === 'failed' ? ' · failed' : '') + '</div><div class="snip">' + esc(String(x.reason || (x.new || [])[0] || x.message || '').split('\n')[0]) + '</div>';
+        b.onclick = () => jumpTo(x.commit, 'chg-' + x.id, ['commit']); g.appendChild(b);
       });
       el.appendChild(g);
     }
