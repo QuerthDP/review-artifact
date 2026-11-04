@@ -8,7 +8,7 @@ A [Claude Code](https://claude.com/claude-code) skill that turns a GitHub pull r
 - Ask Claude about any line or commit; the conversation stays on the page.
 - Other reviewers' threads appear on their lines; reply to them in place.
 - Everything you queue is mirrored into **your pending GitHub review**, which stays private until you submit it yourself.
-- On your own PR, `m` makes Claude edit and commit locally (previous version kept on a `review/pr-<N>-v<k>` branch); on someone else's it drafts a ```` ```suggestion ```` comment.
+- `m` makes Claude propose the change as a card with Accept / Decline. On your own PR, Accept folds it into its commit (previous version kept on a `review/pr-<N>-v<k>` branch; a cloud session pushes the result to `review/pr-<N>` on your fork) and the page shows the new lines in amber over the diff; on someone else's PR, Accept queues it as a ```` ```suggestion ```` comment.
 
 ## Install
 
@@ -32,6 +32,6 @@ Optional badges: put `{"claude": "<html>", "human": "<html>"}` in `~/.config/rev
 
 ## Feedback
 
-Use the **Feedback** button (or `f`) on any review page: tell Claude what bothers you and it files the issue. Or [open one directly](https://github.com/QuerthDP/review-artifact/issues/new).
+Use the **Feedback** button (or `f`) on any review page: tell Claude what bothers you: it files the issue and, when it can push to this repo, fixes the tool and pushes the fix. Or [open one directly](https://github.com/QuerthDP/review-artifact/issues/new).
 
 <a href="https://claude.com/claude-code"><img alt="Generated with Claude Code" src="https://img.shields.io/badge/Generated%20with-Claude%20Code-D97757?style=for-the-badge&logo=claude&logoColor=white"></a>

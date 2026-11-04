@@ -21,11 +21,15 @@ modes = dict(re.findall(r'<!-- (\w+) -->\n(.*?)(?=\n<!-- |\Z)', open(f'{HERE}/mo
 meta = {'repo': repo, 'pr': pr, 'pr_title': a.pr_title or info['title'], 'author': info['user']['login'], 'mine': info['user']['login'] == login}
 if a.collapsed: meta['collapsed'] = a.collapsed.split(',')
 mode = (modes['adopt'].replace('{{ADOPT_URL}}', a.adopt).replace('{{ADOPT_META}}', json.dumps(meta)) if a.adopt else modes['build']) + (f'\n\nWhat the user says about the current state: {a.note}' if a.note else '')
+# On the user's own PR an accepted change is pushed to a review branch on their fork of the repo.
+fork = f"{login}/{repo.split('/')[1]}"
+try: has_fork = meta['mine'] and json.loads(gh(f'repos/{fork}')).get('fork', False)
+except subprocess.CalledProcessError: has_fork = False
 prompt = open(f'{HERE}/prompt.md').read()
 for k, v in {'MODE': mode.strip(), 'REPO': repo, 'REPO_NAME': repo.split('/')[1], 'PR': str(pr),
-             'PR_URL': f'https://github.com/{repo}/pull/{pr}', 'LOGIN': login, 'BADGES_JSON': json.dumps(badges)}.items():
+             'PR_URL': f'https://github.com/{repo}/pull/{pr}', 'LOGIN': login, 'FORK': fork if has_fork else '(none: the user has no fork of this repo)', 'BADGES_JSON': json.dumps(badges)}.items():
     prompt = prompt.replace('{{%s}}' % k, v)
-sources = [{'git_repository': {'url': f'https://github.com/{r}'}} for r in dict.fromkeys([repo, 'QuerthDP/review-artifact'])]
+sources = [{'git_repository': {'url': f'https://github.com/{r}'}} for r in dict.fromkeys([repo, 'QuerthDP/review-artifact'] + ([fork] if has_fork else []))]
 # Hourly fires wake the persistent session so it can rebuild the page after a push.
 minute = datetime.datetime.now(datetime.timezone.utc).minute
 print(json.dumps({
