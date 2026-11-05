@@ -97,6 +97,7 @@ header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 .pill.claude { background: var(--posted-soft); color: var(--posted); }
 .pill.revise { background: var(--posted-soft); color: var(--posted); }
 .pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.dropped { background: var(--amber-bg); color: var(--amber-bd); vertical-align: middle; } .dropmark { color: var(--amber-bd); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: .03em; }
 .card.revise { border-left-color: var(--posted); }
 .ghthread { border: 1px solid var(--line); border-left: 3px solid var(--muted); border-radius: 8px; padding: 8px 10px; margin: 6px 0; background: var(--panel); }
 .ghthread > summary { cursor: pointer; list-style: none; flex-wrap: wrap; }
@@ -584,7 +585,7 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
       const cs = byCommit(c.sha);
       const p = cs.filter(x => x.status === 'proposed').length, q = cs.filter(x => x.status === 'queued').length;
       const b = document.createElement('button'); b.className = 'step' + (i === current ? ' active' : ''); b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', i === current);
-      b.innerHTML = '<span class="n">' + (i + 1) + '/' + COMMITS.length + ' · ' + esc(c.short) + '</span><span class="s">' + esc((Object.values(changes).find(x => x.commit === c.sha && x.op === 'reword' && x.status === 'accepted' && x.message) || {}).message ? String(Object.values(changes).find(x => x.commit === c.sha && x.op === 'reword' && x.status === 'accepted' && x.message).message).split('\n')[0] : c.subject) + '</span><span class="dots">' + '<span class="dot proposed"></span>'.repeat(Math.min(p, 8)) + '<span class="dot queued"></span>'.repeat(Math.min(q, 8)) + '</span>';
+      b.innerHTML = '<span class="n">' + (i + 1) + '/' + COMMITS.length + ' · ' + esc(c.short) + (isDropped(c.sha) ? ' · <span class="dropmark">dropped</span>' : '') + '</span><span class="s">' + esc((Object.values(changes).find(x => x.commit === c.sha && x.op === 'reword' && x.status === 'accepted' && x.message) || {}).message ? String(Object.values(changes).find(x => x.commit === c.sha && x.op === 'reword' && x.status === 'accepted' && x.message).message).split('\n')[0] : c.subject) + '</span><span class="dots">' + '<span class="dot proposed"></span>'.repeat(Math.min(p, 8)) + '<span class="dot queued"></span>'.repeat(Math.min(q, 8)) + '</span>';
       b.onclick = () => go(i); el.appendChild(b);
     });
     const all = Object.values(comments);
@@ -674,6 +675,8 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
   // A change with no path acts on the whole commit: op "drop" removes it, op "reword" gives it a new message.
   const chgWhere = ch => ch.path ? ch.path + lineLabel(ch) : 'commit ' + ((COMMITS.find(c => c.sha === ch.commit) || {}).short || String(ch.commit || '').slice(0, 10)) + (ch.op === 'drop' ? ' · drop' : ' · new message');
   const commitChanges = sha => Object.values(changes).filter(x => x.commit === sha && !x.path && x.op && x.status !== 'landed');
+  // A commit an accepted change dropped from the review branch: marked next to its title and in the stepper.
+  const isDropped = sha => Object.values(changes).some(x => x.commit === sha && !x.path && x.op === 'drop' && x.status === 'accepted');
   function miniDiff(ch) {
     if (!ch.path && ch.op) {
       const cm = COMMITS.find(c => c.sha === ch.commit) || {}, oldMsg = ch.oldMessage || [cm.subject, cm.body].filter(Boolean).join('\n\n');
@@ -775,6 +778,7 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
       if (x.op === 'drop') { h2.classList.add('ovdrop'); h2.insertAdjacentHTML('afterend', '<div class="ovmsg"><span class="ovmark">dropped</span> (accepting…)</div>'); }
       else if (x.op === 'reword') h2.insertAdjacentHTML('afterend', '<div class="ovmsg"><span class="ovmark">new message</span> (accepting…)\n' + esc(x.message || '') + '</div>');
     });
+    if (isDropped(c.sha)) h2.insertAdjacentHTML('beforeend', ' <span class="pill dropped" title="Dropped from the review branch by an accepted change">dropped</span>');
     cchg.filter(x => x.status === 'accepted' && x.op === 'reword' && x.message).forEach(x => {
       const lines = String(x.message).split('\n'), subj = lines[0], body = lines.slice(1).join('\n').replace(/^\n+/, '');
       h2.textContent = subj; const m = el.querySelector('.msg');
