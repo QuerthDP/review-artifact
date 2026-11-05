@@ -104,8 +104,9 @@
   async function sendQuestion(anchor, text, el) {
     if (sending) return; sending = true;
     const id = 'q_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
-    const t = { id, kind: anchor.kind || 'question', commit: anchor.commit, path: anchor.path || null, line: anchor.line || null, startLine: anchor.startLine || null, side: anchor.side || null, about: anchor.about || null, status: 'asked', messages: [{ role: 'user', text, at: new Date().toISOString() }], createdAt: new Date().toISOString() };
-    const aboutNote = anchor.aboutText ? '\n\n(about the comment: "' + anchor.aboutText.replace(/\s+/g, ' ').trim().slice(0, 300) + '")' : '';
+    const t = { id, kind: anchor.kind || 'question', commit: anchor.commit, path: anchor.path || null, line: anchor.line || null, startLine: anchor.startLine || null, side: anchor.side || null, about: anchor.about || null, onChange: anchor.onChange || null, newLine: anchor.newLine || null, status: 'asked', messages: [{ role: 'user', text, at: new Date().toISOString() }], createdAt: new Date().toISOString() };
+    const aboutNote = (anchor.aboutText ? '\n\n(about the comment: "' + anchor.aboutText.replace(/\s+/g, ' ').trim().slice(0, 300) + '")' : '')
+      + (anchor.onChange ? '\n\n(on a line accepted change ' + anchor.onChange + ' wrote, only on the review branch: "' + String(anchor.newLine || '').trim().slice(0, 300) + '")' : '');
     const shellThreadId = await notifyClaude(t, text + aboutNote, el, t.kind === 'modify' ? 'modify request' : t.kind === 'feedback' ? 'feedback request' : 'page question');
     const ok = await writeThread(id, Object.assign({}, t, { shellThreadId, notifyError: shellThreadId ? null : notifyErr }), true);
     sending = false;
@@ -574,7 +575,9 @@
         const tr = document.createElement('tr'), pv = x.status === 'accepting'; tr.className = 'ovnew' + (pv ? ' prev' : ' done');
         // An accepted change is drawn as the plain new version, numbered from the first line it replaces; only a change still being accepted is marked as a preview.
         const g = pv ? '<td class="num ovg"><span class="ovmark">preview</span></td>' : '<td class="num a">' + ((x.startLine || x.line) + i) + '</td>', code = '<td class="code ' + (pv ? 'ovn' : 'a') + (split ? ' r' : '') + '"><span class="marker">+</span>' + hl(s, lang) + '</td>';
-        tr.innerHTML = split ? emptyPair(true) + g + code : (pv ? '<td class="num left ovg"></td>' : '<td class="num left a"></td>') + g + code; return tr;
+        tr.innerHTML = split ? emptyPair(true) + g + code : (pv ? '<td class="num left ovg"></td>' : '<td class="num left a"></td>') + g + code;
+        // Its own id (by change and line) lets the cursor stop on it; the change keeps its PR anchor for comments.
+        tr.dataset.chg = x.id; tr.dataset.nl = s; if (!pv) tr.id = 'ov-' + x.id + '-' + i; return tr;
       };
       function threadRow(refs, lineEl) {
         const here = fileComments.filter(x => refs.some(r => x.line === r.line && (x.side || 'RIGHT') === r.side));
@@ -619,7 +622,7 @@
         ov.filter(x => x.line === rr.line && !superseded(x)).forEach(x => (x.new || []).forEach((s, i) => {
           // In the split view the new lines fill the right side of the removed lines first, so a replaced line sits beside its replacement.
           const slot = x.status === 'accepted' && (ovSlots[x.id] || [])[i];
-          if (slot) { const r = ovRow(x, s, i), num = r.children[2], code = r.children[3]; slot.children[3].replaceWith(code); slot.children[2].replaceWith(num); slot.classList.add('ovfill'); }
+          if (slot) { const r = ovRow(x, s, i), num = r.children[2], code = r.children[3]; slot.children[3].replaceWith(code); slot.children[2].replaceWith(num); slot.classList.add('ovfill'); slot.dataset.chg = x.id; slot.dataset.nl = s; }
           else tbody.appendChild(ovRow(x, s, i));
         }));
         const row = threadRow(refs, tr); if (row) tbody.appendChild(row);
@@ -1013,7 +1016,7 @@
   function flashRow(t) { if (!t.classList) return; t.classList.remove('flash'); void t.offsetWidth; t.classList.add('flash'); }
   // Keyboard cursor: one selected stop (file header, expander row or diff line) so the review can be done without a mouse.
   let cursorId = null;
-  const stops = () => Array.from(document.querySelectorAll('#commit .gstop, #files .file-head, #files tr.line, #files tr.hunk')).filter(el => !el.closest('[hidden]') && (el.classList.contains('file-head') || !el.closest('.collapsed')));
+  const stops = () => Array.from(document.querySelectorAll('#commit .gstop, #files .file-head, #files tr.line, #files tr.ovnew.done, #files tr.hunk')).filter(el => !el.closest('[hidden]') && (el.classList.contains('file-head') || !el.closest('.collapsed')));
   function applyCursor() { document.querySelectorAll('.kcur').forEach(x => x.classList.remove('kcur')); const el = cursorId && document.getElementById(cursorId); if (el) el.classList.add('kcur'); }
   function setCursor(el, scroll) {
     if (!el || !el.id) return; cursorId = el.id; applyCursor(); savePos(); if (scroll === false) return;
@@ -1047,7 +1050,7 @@
     const sec = el.closest('.file'); return sec ? sec.querySelector('.file-head') : el;
   }
   // Arrows also stop on each comment card, reviewer thread and conversation, so the keyboard can enter them; Up from the top reaches the commit stepper.
-  const arrowStops = () => Array.from(document.querySelectorAll('#commit .gstop, #files .file-head, #files tr.line, #files tr.hunk, #files .thread > .card, #files .thread > .chat, #files .thread > .ghthread')).filter(el => !el.closest('[hidden]') && (el.classList.contains('file-head') || !el.closest('.collapsed')));
+  const arrowStops = () => Array.from(document.querySelectorAll('#commit .gstop, #files .file-head, #files tr.line, #files tr.ovnew.done, #files tr.hunk, #files .thread > .card, #files .thread > .chat, #files .thread > .ghthread')).filter(el => !el.closest('[hidden]') && (el.classList.contains('file-head') || !el.closest('.collapsed')));
   function arrowMove(dir) {
     const list = arrowStops(); if (!list.length) return; lastCmt = null;
     const cur = current_(); const i = cur ? list.indexOf(cur) : -1;
@@ -1119,6 +1122,15 @@
     }
     const cur = lineOf(current_());
     if (cur && cur.classList.contains('gstop')) { const b = document.querySelector(sel === '.askbtn' ? '#commit [data-i]' : sel === '.addbtn' ? '#commit [data-k]' : sel === '.modbtn' ? '#commit [data-m]' : null); if (b) b.click(); else toast('Not available at commit level'); return; }
+    // A line an accepted change wrote exists only on the review branch: i and m talk to Claude about it (anchored at the
+    // change's lines), while a GitHub comment has to wait until the branch is pushed to the PR. In the split view the
+    // filled right side of a removed line counts as that new line.
+    const onNew = cur && cur.dataset && cur.dataset.chg && changes[cur.dataset.chg] && (cur.matches('tr.ovnew') || (viewMode === 'split' && sel !== '.addbtn' && cur.classList.contains('ovfill')));
+    if (onNew) {
+      if (sel === '.addbtn') { toast('This line is only on the review branch: comment on it after Push to the PR'); return; }
+      const x = changes[cur.dataset.chg];
+      askAbout({ commit: x.commit, commitIdx: current, path: x.path, line: x.line, startLine: x.startLine || null, side: 'RIGHT', kind: sel === '.modbtn' ? 'modify' : undefined, onChange: x.id, newLine: cur.dataset.nl }); return;
+    }
     if (!cur || !cur.matches('tr.line')) { toast('Select a line first (j / l)'); return; }
     const rows = selRows(), row = rows ? rows[rows.length - 1] : cur;
     // i continues the conversation already open on this line (the selected one, else the latest) instead of starting another.
