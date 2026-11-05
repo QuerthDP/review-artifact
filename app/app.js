@@ -406,6 +406,8 @@
   const chgOpen = new Set(), chgBusy = new Set(); // settled cards the viewer unfolded; accepts in flight
   // Accepting is instant: the card turns accepted and the overlay shows at once. On the viewer's PR, Claude then folds it onto the
   // review branch in the background (applied: false until then); on others' PRs the page queues the suggestion itself.
+  // Accepting a change settles the conversation that asked for it: it is dismissed (restorable from the queue).
+  const dismissOrigin = ch => { const t = ch.threadId && threads[ch.threadId]; if (t && !t.dismissed && t.status === 'answered') writeThread(t.id, { dismissed: true, updatedAt: new Date().toISOString() }, false); };
   async function acceptChange(ch, el) {
     if (chgBusy.has(ch.id)) return; chgBusy.add(ch.id);
     try {
@@ -416,10 +418,10 @@
         const doc = { commit: ch.commit, path: ch.path || null, line: ch.line || null, side: ch.path ? (ch.side || 'RIGHT') : null, startLine: ch.startLine || null, body, author: 'claude', status: 'queued', syncPending: true, createdAt: at };
         if (!await write(cid, doc, true)) return;
         if (!await writeChange(ch.id, { status: 'accepted', decidedAt: at, commentId: cid, error: null })) return;
-        toast('Accepted; suggestion queued'); syncGitHub(Object.assign({ id: cid }, doc), 'new comment'); return;
+        dismissOrigin(ch); toast('Accepted; suggestion queued'); syncGitHub(Object.assign({ id: cid }, doc), 'new comment'); return;
       }
       if (!await writeChange(ch.id, { status: 'accepted', applied: false, decidedAt: at, error: null })) return;
-      toast('Accepted');
+      dismissOrigin(ch); toast('Accepted');
       const live = document.getElementById('chg-' + ch.id);
       notifyClaude(ch, ch.shellThreadId ? '[accept change ' + ch.id + ']' : 'apply it on the review branch', live || el, 'accept change').then(sid => writeChange(ch.id, { shellThreadId: sid || ch.shellThreadId || null, notifyError: sid || ch.shellThreadId ? null : notifyErr }));
     } finally { chgBusy.delete(ch.id); }
