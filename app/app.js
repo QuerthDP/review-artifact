@@ -569,10 +569,10 @@
       const cellCode = (t, s, cls, range) => { let h = hl(s, lang); if (range) h = markRange(h, range[0], range[1]); return '<td class="code ' + cls + '">' + (t ? '<span class="marker">' + (t === 'a' ? '+' : t === 'd' ? '−' : ' ') + '</span>' + h : '') + '</td>'; };
       const emptyPair = (left) => '<td class="num ' + (left ? 'left ' : '') + 'empty"></td><td class="code ' + (left ? 'l' : 'r') + ' empty"></td>';
       // Synthetic rows hold no line numbers or ids: comments keep anchoring to the PR's own lines, and the cursor skips them.
-      const ovRow = (x, s) => {
+      const ovRow = (x, s, i) => {
         const tr = document.createElement('tr'), pv = x.status === 'accepting'; tr.className = 'ovnew' + (pv ? ' prev' : ' done');
-        // An accepted change is drawn as the plain new version; only a change still being accepted is marked as a preview.
-        const g = pv ? '<td class="num ovg"><span class="ovmark">preview</span></td>' : '<td class="num a"></td>', code = '<td class="code ' + (pv ? 'ovn' : 'a') + (split ? ' r' : '') + '"><span class="marker">+</span>' + hl(s, lang) + '</td>';
+        // An accepted change is drawn as the plain new version, numbered from the first line it replaces; only a change still being accepted is marked as a preview.
+        const g = pv ? '<td class="num ovg"><span class="ovmark">preview</span></td>' : '<td class="num a">' + ((x.startLine || x.line) + i) + '</td>', code = '<td class="code ' + (pv ? 'ovn' : 'a') + (split ? ' r' : '') + '"><span class="marker">+</span>' + hl(s, lang) + '</td>';
         tr.innerHTML = split ? emptyPair(true) + g + code : (pv ? '<td class="num left ovg"></td>' : '<td class="num left a"></td>') + g + code; return tr;
       };
       function threadRow(refs, lineEl) {
@@ -601,12 +601,21 @@
         tr.querySelectorAll('.addbtn').forEach(b => b.onclick = e => { openComposer = withRange({ commit: c.sha, commitIdx: current, path: f.path, line: parseInt(b.dataset.line, 10), side: b.dataset.side }, tr, e); editing = null; renderAll(); setTimeout(() => { const t = document.getElementById('composer-ta'); if (t) t.scrollIntoView({ block: 'center' }); }, 0); });
         const rr = refs.find(r => r.side === 'RIGHT'), ov = rr ? ovs.filter(x => rr.line >= (x.startLine || x.line) && rr.line <= x.line) : [];
         // Lines an accepted change replaced are hidden (their comments and the change card still show below); a change being accepted strikes them.
-        if (ov.some(x => x.status === 'accepted')) tr.hidden = true;
+        // An accepted change rewrites the commit's new side only: its old lines stay as removed lines (left side), and a row with nothing on the old side is hidden.
+        if (ov.some(x => x.status === 'accepted')) {
+          const tds = tr.children, oldNum = tds[0], oldCode = split ? tds[1] : tds[2], hasOld = split ? !oldCode.classList.contains('empty') : oldNum.textContent.trim() !== '' || !!oldNum.querySelector('[data-side="LEFT"]');
+          if (!hasOld) tr.hidden = true;
+          else {
+            if (split) { tds[2].className = 'num empty'; tds[2].innerHTML = ''; tds[3].className = 'code r empty'; tds[3].innerHTML = ''; }
+            else { tds[1].innerHTML = ''; }
+            oldNum.classList.add('d'); oldCode.classList.add('d'); const mk = oldCode.querySelector('.marker'); if (mk) mk.textContent = '−';
+          }
+        }
         else if (ov.length) { const cs = tr.querySelectorAll('td.code'), cell = cs[cs.length - 1]; if (cell && !cell.classList.contains('empty')) cell.classList.add('ovold'); tr.classList.add('ovprev'); }
         tbody.appendChild(tr);
         // A change accepted later over the same lines replaces this one's new lines (e.g. a reworded comment, later deleted with its block).
         const superseded = x => ovs.some(y => y !== x && y.status === 'accepted' && (y.startLine || y.line) <= (x.startLine || x.line) && y.line >= x.line && String(y.decidedAt || y.at || '') > String(x.decidedAt || x.at || ''));
-        ov.filter(x => x.line === rr.line && !superseded(x)).forEach(x => (x.new || []).forEach(s => tbody.appendChild(ovRow(x, s))));
+        ov.filter(x => x.line === rr.line && !superseded(x)).forEach(x => (x.new || []).forEach((s, i) => tbody.appendChild(ovRow(x, s, i))));
         const row = threadRow(refs, tr); if (row) tbody.appendChild(row);
       }
       // GitHub-style context expansion: the unchanged lines between hunks come from the file's full text at this commit.
