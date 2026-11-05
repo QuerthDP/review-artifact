@@ -584,7 +584,7 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
       const cs = byCommit(c.sha);
       const p = cs.filter(x => x.status === 'proposed').length, q = cs.filter(x => x.status === 'queued').length;
       const b = document.createElement('button'); b.className = 'step' + (i === current ? ' active' : ''); b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', i === current);
-      b.innerHTML = '<span class="n">' + (i + 1) + '/' + COMMITS.length + ' · ' + esc(c.short) + '</span><span class="s">' + esc(c.subject) + '</span><span class="dots">' + '<span class="dot proposed"></span>'.repeat(Math.min(p, 8)) + '<span class="dot queued"></span>'.repeat(Math.min(q, 8)) + '</span>';
+      b.innerHTML = '<span class="n">' + (i + 1) + '/' + COMMITS.length + ' · ' + esc(c.short) + '</span><span class="s">' + esc((Object.values(changes).find(x => x.commit === c.sha && x.op === 'reword' && x.status === 'accepted' && x.message) || {}).message ? String(Object.values(changes).find(x => x.commit === c.sha && x.op === 'reword' && x.status === 'accepted' && x.message).message).split('\n')[0] : c.subject) + '</span><span class="dots">' + '<span class="dot proposed"></span>'.repeat(Math.min(p, 8)) + '<span class="dot queued"></span>'.repeat(Math.min(q, 8)) + '</span>';
       b.onclick = () => go(i); el.appendChild(b);
     });
     const all = Object.values(comments);
@@ -769,12 +769,16 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
     gen.forEach(x => g.appendChild(card(x)));
     const h2 = el.querySelector('h2'), cchg = commitChanges(c.sha);
     cchg.forEach(x => g.appendChild(changeCard(x)));
-    // Accepted commit changes live on the review branch: strike the dropped commit, show the new message under the old one.
-    const acc = cchg.filter(x => x.status === 'accepted' || x.status === 'accepting');
-    acc.forEach(x => {
-      const prev = x.status === 'accepting' ? ' (accepting…)' : ' on ' + esc(x.branch || 'the review branch');
-      if (x.op === 'drop') { h2.classList.add('ovdrop'); h2.insertAdjacentHTML('afterend', '<div class="ovmsg"><span class="ovmark">dropped</span>' + prev + '</div>'); }
-      else if (x.op === 'reword') h2.insertAdjacentHTML('afterend', '<div class="ovmsg"><span class="ovmark">new message</span>' + prev + '\n' + esc(x.message || '') + '</div>');
+    // Accepted commit changes live on the review branch: show the commit as it is there (the new message; a dropped commit
+    // keeps its diff and its card says it is gone). A change still being accepted is previewed under the old title.
+    cchg.filter(x => x.status === 'accepting').forEach(x => {
+      if (x.op === 'drop') { h2.classList.add('ovdrop'); h2.insertAdjacentHTML('afterend', '<div class="ovmsg"><span class="ovmark">dropped</span> (accepting…)</div>'); }
+      else if (x.op === 'reword') h2.insertAdjacentHTML('afterend', '<div class="ovmsg"><span class="ovmark">new message</span> (accepting…)\n' + esc(x.message || '') + '</div>');
+    });
+    cchg.filter(x => x.status === 'accepted' && x.op === 'reword' && x.message).forEach(x => {
+      const lines = String(x.message).split('\n'), subj = lines[0], body = lines.slice(1).join('\n').replace(/^\n+/, '');
+      h2.textContent = subj; const m = el.querySelector('.msg');
+      if (m) { if (body) m.textContent = body; else m.remove(); } else if (body) { const p = document.createElement('p'); p.className = 'msg'; p.textContent = body; el.querySelector('.meta').insertAdjacentElement('afterend', p); }
     });
     threadsAt(c.sha, null, null).forEach(t => g.appendChild(threadCard(t, h2)));
     ghAt(c.sha, null, null).forEach(t => g.appendChild(ghThreadCard(t)));
@@ -843,9 +847,10 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
       const emptyPair = (left) => '<td class="num ' + (left ? 'left ' : '') + 'empty"></td><td class="code ' + (left ? 'l' : 'r') + ' empty"></td>';
       // Synthetic rows hold no line numbers or ids: comments keep anchoring to the PR's own lines, and the cursor skips them.
       const ovRow = (x, s) => {
-        const tr = document.createElement('tr'); tr.className = 'ovnew' + (x.status === 'accepting' ? ' prev' : '');
-        const g = '<td class="num ovg"><span class="ovmark">' + (x.status === 'accepting' ? 'preview' : 'accepted') + '</span></td>', code = '<td class="code ovn' + (split ? ' r' : '') + '"><span class="marker">+</span>' + hl(s, lang) + '</td>';
-        tr.innerHTML = split ? emptyPair(true) + g + code : '<td class="num left ovg"></td>' + g + code; return tr;
+        const tr = document.createElement('tr'), pv = x.status === 'accepting'; tr.className = 'ovnew' + (pv ? ' prev' : ' done');
+        // An accepted change is drawn as the plain new version; only a change still being accepted is marked as a preview.
+        const g = pv ? '<td class="num ovg"><span class="ovmark">preview</span></td>' : '<td class="num a"></td>', code = '<td class="code ' + (pv ? 'ovn' : 'a') + (split ? ' r' : '') + '"><span class="marker">+</span>' + hl(s, lang) + '</td>';
+        tr.innerHTML = split ? emptyPair(true) + g + code : (pv ? '<td class="num left ovg"></td>' : '<td class="num left a"></td>') + g + code; return tr;
       };
       function threadRow(refs, lineEl) {
         const here = fileComments.filter(x => refs.some(r => x.line === r.line && (x.side || 'RIGHT') === r.side));
@@ -872,7 +877,9 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
         tr.querySelectorAll('.modbtn').forEach(b => b.onclick = e => { const r = refs[refs.length - 1]; askAbout(withRange({ commit: c.sha, commitIdx: current, path: f.path, line: r.line, side: r.side, kind: 'modify' }, tr, e)); });
         tr.querySelectorAll('.addbtn').forEach(b => b.onclick = e => { openComposer = withRange({ commit: c.sha, commitIdx: current, path: f.path, line: parseInt(b.dataset.line, 10), side: b.dataset.side }, tr, e); editing = null; renderAll(); setTimeout(() => { const t = document.getElementById('composer-ta'); if (t) t.scrollIntoView({ block: 'center' }); }, 0); });
         const rr = refs.find(r => r.side === 'RIGHT'), ov = rr ? ovs.filter(x => rr.line >= (x.startLine || x.line) && rr.line <= x.line) : [];
-        if (ov.length) { const cs = tr.querySelectorAll('td.code'), cell = cs[cs.length - 1]; if (cell && !cell.classList.contains('empty')) cell.classList.add('ovold'); if (ov.every(x => x.status === 'accepting')) tr.classList.add('ovprev'); }
+        // Lines an accepted change replaced are hidden (their comments and the change card still show below); a change being accepted strikes them.
+        if (ov.some(x => x.status === 'accepted')) tr.hidden = true;
+        else if (ov.length) { const cs = tr.querySelectorAll('td.code'), cell = cs[cs.length - 1]; if (cell && !cell.classList.contains('empty')) cell.classList.add('ovold'); tr.classList.add('ovprev'); }
         tbody.appendChild(tr);
         ov.filter(x => x.line === rr.line).forEach(x => (x.new || []).forEach(s => tbody.appendChild(ovRow(x, s))));
         const row = threadRow(refs, tr); if (row) tbody.appendChild(row);
