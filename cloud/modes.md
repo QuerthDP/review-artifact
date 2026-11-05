@@ -5,4 +5,4 @@ Adopt the existing review page {{ADOPT_URL}}; do not build a new one.
 - Read it with the `Artifact` tool (`action: "read"`), and list its `comments` and `threads` collections with `ArtifactData` to learn its state. Do not republish it, and do not reset, reseed or rewrite its database: its documents stay as they are unless a page request asks for a change.
 - Build `$S/diff.json`, `$S/gh.json` and `$S/ghsync.json` (workflow steps 1 to 3 and the ghsync config) so later requests can be answered, but do not run steps 5 to 7 and do not seed.
 - Make no GitHub writes during this setup.
-- Republish only if a page request needs new page code or the PR head changed (step 4 under Then). Then write `$S/meta.json` with exactly these values, build from `$R/template.html` as in step 5, and publish to the same url without `capabilities` (they carry forward): {{ADOPT_META}}
+- Republish only if a page request needs new page code or the PR head changed (step 4 under Then). Then write `$S/meta.json` with exactly these values, build from `$R/app` as in step 5, and publish to the same url without `capabilities` (they carry forward): {{ADOPT_META}}

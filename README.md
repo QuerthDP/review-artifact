@@ -1,6 +1,6 @@
 # review-artifact
 
-A [Claude Code](https://claude.com/claude-code) skill that turns a GitHub pull request into an interactive, per-commit review page (a claude.ai Artifact).
+A [Claude Code](https://claude.com/claude-code) skill that turns a GitHub pull request into an interactive, per-commit review page: a local web app on your machine, or a claude.ai Artifact run by a cloud session.
 
 - Step through the PR commit by commit, in split or unified view, with syntax highlighting, intra-line change marks and GitHub-style "expand context".
 - Review with the keyboard only: `[` `]` commit, `j` `l` move, PgUp/PgDn screen, `n` `p` next/previous comment, `k` comment, `i` ask Claude, `m` ask Claude to change the line, Enter expand.
@@ -8,7 +8,7 @@ A [Claude Code](https://claude.com/claude-code) skill that turns a GitHub pull r
 - Ask Claude about any line or commit; the conversation stays on the page.
 - Other reviewers' threads appear on their lines; reply to them in place.
 - Everything you queue is mirrored into **your pending GitHub review**, which stays private until you submit it yourself.
-- `m` makes Claude propose the change as a card with Accept / Decline. On your own PR, Accept folds it into its commit (previous version kept on a `review/pr-<N>-v<k>` branch; a cloud session pushes the result to `review/pr-<N>` on your fork) and the page shows the new lines in amber over the diff; on someone else's PR, Accept queues it as a ```` ```suggestion ```` comment.
+- `m` makes Claude propose the change as a card with Accept / Decline. On your own PR, Accept folds it into its commit on a `review/pr-<N>` branch pushed to your fork (the previous version kept as `review/pr-<N>-v<k>`); "Push to the PR" moves it onto your PR branch. Nothing is ever pushed to the upstream repository and the page shows the new lines in amber over the diff; on someone else's PR, Accept queues it as a ```` ```suggestion ```` comment.
 
 ## Install
 
@@ -20,13 +20,13 @@ ln -s review-artifact/local ~/.claude/skills/review-artifact-local
 The clone gives two skills:
 
 - `/review-artifact <PR>` starts a persistent claude.ai/code cloud session (a routine) that builds the page and keeps answering it, so your machine does not have to stay on. `--adopt <artifact url>` hands an existing page over to the cloud. The cloud session reaches GitHub over REST only, through the repositories attached to it.
-- `/review-artifact-local <PR>` does the same in your current session; run it inside a clone of the repository under review.
+- `/review-artifact-local <PR>` runs the page as a local web app (`local/server.py`, opened in its own browser window) answered by your current session; run it inside a clone of the repository under review. Accepting changes, GitHub sync and submitting run on your machine at once; Claude answers questions and change requests through the app's store.
 
 ```
 /review-artifact https://github.com/<owner>/<repo>/pull/<N>
 ```
 
-Requirements: `gh` (authenticated), `git`, `python3`, and a claude.ai account with Artifacts. `node` is used for a syntax check.
+Requirements: `gh` (authenticated), `git`, `python3`; Chrome or Chromium for the app window (any browser works); a claude.ai account with Artifacts for the cloud page. `node` is used for a syntax check.
 
 Optional badges: put `{"claude": "<html>", "human": "<html>"}` in `~/.config/review-artifact/badges.json` to sign what Claude posts (and comments you mark "Reviewed by Human"). Without it nothing is signed.
 
