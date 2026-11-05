@@ -5,17 +5,19 @@
   store.py [--port 8765] set|update <collection> <id> <json | @file>   update merges fields; {"__delete__": true} removes one
   store.py [--port 8765] delete <collection> <id>
   store.py [--port 8765] batch <json | @file>                         [{op, collection, doc_id, data}], as seeds.py writes them
+  store.py [--port 8765] next [--wait 540]                            the page's next requests to Claude, one JSON line each;
+                                                                      "idle" after the wait, "server stopped" (exit 3) once it is gone
 
 The page shows every write at once."""
-import json, os, sys, urllib.request
+import json, os, sys, urllib.error, urllib.request
 a = sys.argv[1:]
 port = 8765
 if a[:1] == ['--port']: port, a = int(a[1]), a[2:]
 BASE = f'http://127.0.0.1:{port}/api/'
-def call(path, body=None):
+def call(path, body=None, timeout=60):
     req = urllib.request.Request(BASE + path, data=None if body is None else json.dumps(body).encode(),
                                  headers={'content-type': 'application/json', 'x-review': '1'})
-    with urllib.request.urlopen(req, timeout=60) as r: return json.load(r)
+    with urllib.request.urlopen(req, timeout=timeout) as r: return json.load(r)
 def arg(s): return json.load(open(s[1:])) if s.startswith('@') else json.loads(s)
 cmd = a[0] if a else ''
 if cmd in ('list', 'get'):
@@ -28,6 +30,16 @@ if cmd in ('list', 'get'):
     else: print(json.dumps(docs, indent=1))
 elif cmd in ('set', 'update', 'delete'):
     r = call('db', {'op': cmd, 'col': a[1], 'id': a[2], 'data': arg(a[3]) if cmd != 'delete' else None}); print('ok' if all(r['ok']) else 'version conflict')
+elif cmd == 'next':
+    wait = int(a[a.index('--wait') + 1]) if '--wait' in a else 540
+    try: items = call('inbox', {'wait': wait}, timeout=wait + 60)
+    except TimeoutError: items = []
+    except (urllib.error.URLError, ConnectionError) as e:
+        if isinstance(e, urllib.error.HTTPError): raise
+        if isinstance(getattr(e, 'reason', None), TimeoutError): items = []
+        else: print('server stopped'); sys.exit(3)
+    for it in items: print(json.dumps(it))
+    if not items: print('idle')
 elif cmd == 'batch':
     r = call('db', {'op': 'batch', 'writes': arg(a[1])}); print(sum(r['ok']), 'of', len(r['ok']), 'writes applied')
 else: sys.exit(__doc__)

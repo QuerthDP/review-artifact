@@ -14,19 +14,19 @@ A [Claude Code](https://claude.com/claude-code) skill that turns a GitHub pull r
 
 ```sh
 git clone https://github.com/QuerthDP/review-artifact ~/.claude/skills/review-artifact
-ln -s review-artifact/local ~/.claude/skills/review-artifact-local
+ln -s review-artifact/remote ~/.claude/skills/review-artifact-remote
 ```
 
 The clone gives two skills:
 
-- `/review-artifact <PR>` starts a persistent claude.ai/code cloud session (a routine) that builds the page and keeps answering it, so your machine does not have to stay on. `--adopt <artifact url>` hands an existing page over to the cloud. The cloud session reaches GitHub over REST only, through the repositories attached to it.
-- `/review-artifact-local <PR>` runs the page as a local web app (`local/server.py`, opened in its own browser window) answered by your current session; run it inside a clone of the repository under review. Accepting changes, GitHub sync and submitting run on your machine at once; Claude answers questions and change requests through the app's store.
+- `/review-artifact <PR>` runs the page as a local web app (`local/server.py`) and opens it in a browser tab; run it inside a clone of the repository under review. Accepting changes, GitHub sync and submitting run on your machine at once. A background Claude agent answers questions and change requests, so the session you started it from stays free. `--stop` stops the app; it also stops by itself once the PR is closed.
+- `/review-artifact-remote <PR>` builds the page as a claude.ai Artifact, usable from anywhere, and starts a persistent claude.ai/code cloud session (a routine) that keeps answering it, so your machine does not have to stay on. `--adopt <artifact url>` hands an existing page over to the cloud. The cloud session reaches GitHub over REST only, through the repositories attached to it.
 
 ```
 /review-artifact https://github.com/<owner>/<repo>/pull/<N>
 ```
 
-Requirements: `gh` (authenticated), `git`, `python3`; Chrome or Chromium for the app window (any browser works); a claude.ai account with Artifacts for the cloud page. `node` is used for a syntax check.
+Requirements: `gh` (authenticated), `git`, `python3`, a browser; a claude.ai account with Artifacts and cloud sessions for `/review-artifact-remote`. `node` is used for a syntax check.
 
 Optional badges: put `{"claude": "<html>", "human": "<html>"}` in `~/.config/review-artifact/badges.json` to sign what Claude posts (and comments you mark "Reviewed by Human"). Without it nothing is signed.
 

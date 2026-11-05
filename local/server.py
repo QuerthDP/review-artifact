@@ -1,17 +1,22 @@
 """Local review app: serves the review page (app/) on this machine and keeps its store, so git and GitHub work runs here.
 
-  server.py <PR url | owner/repo#N> [--repo-dir DIR] [--port 8765] [--state DIR] [--session URL] [--open] [--no-push]
+  server.py <PR url | owner/repo#N> [--repo-dir DIR] [--port N] [--state DIR] [--session URL] [--open] [--detach] [--no-push]
+  server.py <PR url | owner/repo#N> --stop [--state DIR]
+
+--detach starts the server in its own session (it outlives the caller) and prints its info line once it listens; when a
+server for the PR already runs, it is reused (the line says "reused": true). --port defaults to the first free one from
+8765. --open opens the page in a browser tab. The server stops itself once the PR is closed.
 
 The page is the same code as the claude.ai review artifact. The server stands in for the artifact platform: it keeps the
 page's comments/threads/changes collections in <state>/db.json, and every request the page sends to Claude arrives here.
 Mechanical requests run at once on this machine (accepting a change on the review branch, pushing it to the user's fork,
 GitHub sync, submitting the review, posting conversation replies). The rest (questions, change and revision requests,
-feedback, review requests, a new PR head) go to <state>/inbox.jsonl, one JSON line each, for the Claude Code session that
-started the server: it watches that file and answers by writing docs back through store.py.
+feedback, review requests, a new PR head) go to <state>/inbox.jsonl, one JSON line each, for the Claude agent answering
+the page: it takes them with "store.py next" and answers by writing docs back through store.py.
 
 Pushes go only to the user's own fork (a remote whose owner is the user's login), never to the PR's upstream repository
 or any repository of its owner. Listens on 127.0.0.1 only; POSTs need the X-Review header and a local Host."""
-import json, os, re, shlex, shutil, subprocess, sys, tempfile, threading, time, traceback
+import json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, threading, time, traceback, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -21,14 +26,53 @@ argv = sys.argv[1:]
 def opt(name, default=None):
     return argv[argv.index(name) + 1] if name in argv else default
 m = re.search(r'github\.com/([^/]+)/([^/]+)/pull/(\d+)', argv[0]) or re.match(r'([^/\s]+)/([^#\s]+)#(\d+)$', argv[0])
-if not m: sys.exit('usage: server.py <PR url | owner/repo#N> [--repo-dir DIR] [--port N] [--state DIR] [--session URL] [--open]')
+if not m: sys.exit(__doc__)
 OWNER, NAME, N = m[1], m[2], int(m[3]); SLUG = f'{OWNER}/{NAME}'
 REPO_DIR = os.path.abspath(opt('--repo-dir', os.getcwd()))
-PORT = int(opt('--port', '8765'))
+PORT_OPT = opt('--port')
 STATE = os.path.abspath(os.path.expanduser(opt('--state', f'~/.cache/review-artifact/{OWNER}_{NAME}_{N}')))
 SESSION = opt('--session', '')
 NO_PUSH = '--no-push' in argv  # for trying the server out: accepts stay on the local review branch
 os.makedirs(STATE, exist_ok=True)
+INFO = os.path.join(STATE, 'server.json')  # url, port and pid of the running server
+
+def open_tab(url):
+    subprocess.Popen(['xdg-open', url] if shutil.which('xdg-open') else ['python3', '-m', 'webbrowser', '-t', url],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+def running():
+    """The info of a live server for this PR, or None."""
+    try: info = json.load(open(INFO)); os.kill(info['pid'], 0)
+    except (OSError, ValueError, KeyError): return None
+    try:
+        with urllib.request.urlopen(info['url'] + 'api/ping', timeout=5) as r:
+            return info if json.load(r).get('pr') == f'{SLUG}#{N}' else None
+    except Exception: return None
+
+if '--stop' in argv:
+    info = running()
+    if info: os.kill(info['pid'], signal.SIGTERM); print('stopped', info['url'])
+    else: print('not running')
+    sys.exit(0)
+if '--detach' in argv or '--open' in argv:
+    info = running()
+    if info:
+        if '--open' in argv: open_tab(info['url'])
+        print(json.dumps(dict(info, reused=True))); sys.exit(0)
+if '--detach' in argv:
+    try: os.remove(INFO)
+    except FileNotFoundError: pass
+    out = open(os.path.join(STATE, 'server.out'), 'w')
+    child = subprocess.Popen([sys.executable, '-I', os.path.abspath(__file__)] + [a for a in argv if a != '--detach'], cwd=os.getcwd(),
+                             stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+    deadline = time.time() + 580
+    while time.time() < deadline and child.poll() is None:
+        try:
+            info = json.load(open(INFO))
+            if info.get('pid') == child.pid: print(json.dumps(info)); sys.exit(0)
+        except (FileNotFoundError, ValueError): pass
+        time.sleep(0.5)
+    sys.exit('the server did not start:\n' + open(os.path.join(STATE, 'server.out')).read()[-2000:])
 LOG = open(os.path.join(STATE, 'server.log'), 'a', buffering=1)
 def log(*a): print(time.strftime('%H:%M:%S'), *a, file=LOG)
 
@@ -115,21 +159,57 @@ def watch_head():
     while True:
         time.sleep(60)
         try:
-            head = run('gh', 'api', f'repos/{SLUG}/pulls/{N}', '--jq', '.head.sha').strip()
+            head, state = (run('gh', 'api', f'repos/{SLUG}/pulls/{N}', '--jq', '.head.sha + " " + .state').split() + ['', ''])[:2]
+            if state and state != 'open': return close_down()
             if head and head != REVIEW.get('reviewVersion'):
                 old = REVIEW.get('reviewVersion'); build()
                 with lock: DB['version'] += 1; lock.notify_all()
                 to_claude(None, f'[new head {head}] the PR head moved from {old}; mark accepted changes landed or stale as the workflow says')
         except Exception as e: log('head check failed:', e)
 
+def close_down():
+    """The PR is closed: tell the agent, give it time to take the message, then stop."""
+    to_claude(None, '[pr closed] the PR is closed; the server stops')
+    deadline = time.time() + 600
+    while time.time() < deadline and read_cursor() < len(inbox_lines()): time.sleep(5)
+    time.sleep(3)  # let the response carrying the message reach the agent
+    stop()
+
+def stop(*_):
+    try:
+        if json.load(open(INFO)).get('pid') == os.getpid(): os.remove(INFO)
+    except (OSError, ValueError): pass
+    log('stopped'); os._exit(0)
+
 # ---- requests to Claude --------------------------------------------------------------------------------------------
 INBOX = os.path.join(STATE, 'inbox.jsonl')
+CURSOR = os.path.join(STATE, 'inbox.cursor')  # how many inbox lines the agent has taken
 seq = [int(time.time() * 1000)]
 def to_claude(thread, text):
     with lock:
         seq[0] += 1; tid = thread or f'local_{seq[0]}'
         with open(INBOX, 'a') as f: f.write(json.dumps({'threadId': tid, 'text': text, 'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}) + '\n')
+        lock.notify_all()
     return tid
+
+def inbox_lines():
+    try: return open(INBOX).read().splitlines()
+    except FileNotFoundError: return []
+def read_cursor():
+    try: return int(open(CURSOR).read().strip() or 0)
+    except (FileNotFoundError, ValueError): return 0
+
+def take_inbox(wait):
+    """Blocks up to `wait` seconds for requests the agent has not taken yet; returns them and marks them taken."""
+    end = time.time() + max(0, min(wait, 570))
+    with lock:
+        while True:
+            lines, cur = inbox_lines(), read_cursor()
+            left = end - time.time()
+            if len(lines) > cur or left <= 0: break
+            lock.wait(min(left, 30))
+        open(CURSOR, 'w').write(str(len(lines)))
+    return [json.loads(x) for x in lines[cur:] if x.strip()]
 
 work = []; work_cv = threading.Condition()
 def enqueue(job):
@@ -294,6 +374,7 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.local_host(): return self.send(403, {'error': 'bad host'})
         u = urlparse(self.path); q = parse_qs(u.query)
+        if u.path == '/api/ping': return self.send(200, {'pr': f'{SLUG}#{N}', 'pid': os.getpid()})
         if u.path == '/api/review': return self.send(200, dict(REVIEW['data'], reviewVersion=REVIEW['reviewVersion'], appVersion=str(os.path.getmtime(os.path.join(APP, 'app.js')))))
         if u.path == '/api/db':
             since = int((q.get('since') or ['-1'])[0])
@@ -312,19 +393,29 @@ class H(BaseHTTPRequestHandler):
                 writes = body['writes'] if body.get('op') == 'batch' else [body]
                 ok = commit_writes(writes)
                 with lock: return self.send(200, dict(snapshot(), ok=ok))
+            if self.path == '/api/inbox':
+                return self.send(200, take_inbox(float(body.get('wait') or 0)))
             if self.path == '/api/claude':
                 return self.send(200, {'threadId': route(body.get('threadId'), body.get('text') or '')})
         except Exception as e:
             return self.send(400, {'error': str(e)[:300], 'code': 'bad_request'})
         self.send(404, {'error': 'not found'})
 
+def bind():
+    for port in ([int(PORT_OPT)] if PORT_OPT else range(8765, 8800)):
+        try: return ThreadingHTTPServer(('127.0.0.1', port), H), port
+        except OSError:
+            if PORT_OPT: raise
+    sys.exit('no free port between 8765 and 8799')
+
 if __name__ == '__main__':
     build()
+    srv, port = bind()
     for t in (watch_head, worker): threading.Thread(target=t, daemon=True).start()
-    srv = ThreadingHTTPServer(('127.0.0.1', PORT), H)
-    url = f'http://127.0.0.1:{PORT}/'
-    print(json.dumps({'url': url, 'state': STATE, 'inbox': INBOX, 'login': LOGIN, 'fork': FORK, 'mine': REVIEW['data']['mine']}), flush=True)
-    if '--open' in argv:
-        browser = shutil.which('google-chrome') or shutil.which('chromium') or shutil.which('chromium-browser')
-        subprocess.Popen([browser, f'--app={url}'] if browser else ['xdg-open', url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    signal.signal(signal.SIGTERM, stop)
+    url = f'http://127.0.0.1:{port}/'
+    info = {'url': url, 'port': port, 'pid': os.getpid(), 'state': STATE, 'inbox': INBOX, 'login': LOGIN, 'fork': FORK, 'mine': REVIEW['data']['mine']}
+    tmp = INFO + '.tmp'; json.dump(info, open(tmp, 'w')); os.replace(tmp, INFO)
+    print(json.dumps(info), flush=True); log('listening on', url)
+    if '--open' in argv: open_tab(url)
     srv.serve_forever()
