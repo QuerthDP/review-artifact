@@ -79,11 +79,12 @@ header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 .top h1 { font-size: 15px; font-weight: 600; margin: 0; }
 .top h1 span { color: var(--muted); font-weight: 400; }
 .stepper { display: flex; gap: 6px; overflow-x: auto; padding-block: 6px; scrollbar-width: thin; }
-.step { flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 6px 10px; cursor: pointer; text-align: left; max-width: 240px; min-width: 0; }
-.step .n { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+.step { flex: 1 1 0; width: 0; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 6px 10px; cursor: pointer; text-align: left; max-width: 240px; min-width: 72px; }
+.step .n { font-size: 11px; color: var(--muted); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .step .s { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .step.active { border-color: var(--accent); background: var(--accent-soft); }
-.step .dots { display: flex; gap: 3px; }
+.step .dots { display: flex; gap: 3px; overflow: hidden; }
+.step .dot { flex: 0 0 auto; }
 .dot { width: 7px; height: 7px; border-radius: 50%; }
 .dot.proposed { background: var(--proposed); } .dot.queued { background: var(--queued); }
 .nav { display: flex; gap: 6px; margin-left: auto; align-items: center; }
