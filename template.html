@@ -67,6 +67,8 @@ a { color: var(--accent); }
 button { font: inherit; }
 .btn { border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
 .btn:hover { border-color: var(--accent); }
+a.btn { text-decoration: none; }
+a.btn:not([hidden]) { display: inline-block; }
 .btn:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 .btn.small { padding: 2px 8px; font-size: 12px; }
@@ -257,6 +259,7 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
       <button class="btn small" id="mode" aria-label="Toggle split or unified diff">Unified</button>
       <button class="btn small" id="queuetoggle" aria-label="Show or hide the review queue">Hide queue</button>
       <button class="btn small primary" id="submitrev" aria-label="Submit your GitHub review">Submit review</button>
+      <a class="btn small" id="sessionlink" target="_blank" rel="noopener" aria-label="Open the Claude session working on this review" hidden>Session</a>
       <button class="btn small" id="feedback" aria-label="Send feedback about this review tool">Feedback</button>
       <button class="btn small" id="askreview" aria-label="Ask Claude to review the whole PR">Ask Claude to review</button>
       <button class="btn small" id="prev" aria-label="Previous commit">‹ Prev</button>
@@ -326,6 +329,8 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
   }
   function cleanTextOf(h) { const d = document.createElement('div'); d.innerHTML = cleanHTML(h || ''); return (d.textContent || '').replace(/\s+/g, ' ').trim(); }
   function ghAt(sha, path, refs) { return GH.threads.filter(t => t.commit === sha && t.path === path && (refs ? refs.some(r => t.line === r.line && t.side === r.side) : !t.line)); }
+  const SESSION_URL = __SESSION_URL__; // the Claude Code session answering this page, if known
+  { const a = document.getElementById('sessionlink'); if (a && /^https:\/\/claude\.ai\/code\//.test(SESSION_URL)) { a.href = SESSION_URL; a.hidden = false; } }
   const PR_MINE = __PR_MINE__; // the viewer authored the PR: change requests edit and commit locally instead of suggesting
   const REPO = 'https://github.com/__REPO_SLUG__', REPO_SLUG = '__REPO_SLUG__', PR_NUMBER = __PR_NUMBER__;
   // Submitting goes straight to GitHub through the viewer's GitHub connector; Claude is the fallback.
