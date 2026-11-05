@@ -881,7 +881,9 @@ tr.ovnew.prev td.ovg, tr.ovnew.prev td.ovn { opacity: .55; }
         if (ov.some(x => x.status === 'accepted')) tr.hidden = true;
         else if (ov.length) { const cs = tr.querySelectorAll('td.code'), cell = cs[cs.length - 1]; if (cell && !cell.classList.contains('empty')) cell.classList.add('ovold'); tr.classList.add('ovprev'); }
         tbody.appendChild(tr);
-        ov.filter(x => x.line === rr.line).forEach(x => (x.new || []).forEach(s => tbody.appendChild(ovRow(x, s))));
+        // A change accepted later over the same lines replaces this one's new lines (e.g. a reworded comment, later deleted with its block).
+        const superseded = x => ovs.some(y => y !== x && y.status === 'accepted' && (y.startLine || y.line) <= (x.startLine || x.line) && y.line >= x.line && String(y.decidedAt || y.at || '') > String(x.decidedAt || x.at || ''));
+        ov.filter(x => x.line === rr.line && !superseded(x)).forEach(x => (x.new || []).forEach(s => tbody.appendChild(ovRow(x, s))));
         const row = threadRow(refs, tr); if (row) tbody.appendChild(row);
       }
       // GitHub-style context expansion: the unchanged lines between hunks come from the file's full text at this commit.
