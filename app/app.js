@@ -1101,6 +1101,12 @@
     if (k === 'Enter') { const el = st[fbCur]; if (!el) return false; if (el.tagName === 'BUTTON') el.click(); else { const ta = el.querySelector('textarea'); if (ta) ta.focus(); } return true; }
     return false;
   }
+  // Leaves a text box in the panel without closing it: the cursor stays on the item that held the box.
+  function fbLeaveText(ta) {
+    const st = Array.from(document.querySelectorAll('#fb-panel .fbstop')), i = st.findIndex(el => el.contains(ta));
+    if (i >= 0) fbCur = i;
+    lsSet('focus', ''); ta.blur(); markFb(true);
+  }
   // Header panels open just under the button that opened them, not below the whole header.
   function placePanels() { [['fb-panel', 'feedback'], ['sub-panel', 'submitrev']].forEach(([pid, bid]) => { const p = document.getElementById(pid), b = document.getElementById(bid); if (!p || !b) return; const top = Math.max(8, Math.round(b.getBoundingClientRect().bottom + 6)); p.style.top = top + 'px'; p.style.maxHeight = 'calc(100vh - ' + (top + 16) + 'px)'; }); }
   function measureHead() { const st = document.documentElement.style, fh = document.querySelector('#files .file-head'); st.setProperty('--head-h', document.getElementById('top').offsetHeight + 'px'); if (fh) st.setProperty('--fh-h', fh.offsetHeight + 'px'); }
@@ -1423,6 +1429,8 @@
       if (e.target.id === 'sub-body' && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey) { e.preventDefault(); stepReviewType(e.key === 'ArrowDown' ? 1 : -1); return; }
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.target.id === 'sub-body') { e.preventDefault(); const g = document.getElementById('sub-go'); if (g && !g.disabled) g.click(); return; }
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.target.tagName === 'TEXTAREA' && e.target.id !== 'sub-body') { e.preventDefault(); const btn = e.target.parentElement.querySelector('.btn.primary, [data-act="followup"]'); if (btn) btn.click(); }
+      // In the feedback panel the first Esc only leaves the text box, so j / l and Enter reach the panel's items; the next Esc closes it.
+      if (e.key === 'Escape' && fbOpen && e.target.closest('#fb-panel')) { e.preventDefault(); fbLeaveText(e.target); return; }
       if (e.key === 'Escape') closeAll();
       return;
     }
