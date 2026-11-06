@@ -104,9 +104,9 @@
   async function sendQuestion(anchor, text, el) {
     if (sending) return; sending = true;
     const id = 'q_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
-    const t = { id, kind: anchor.kind || 'question', commit: anchor.commit, path: anchor.path || null, line: anchor.line || null, startLine: anchor.startLine || null, side: anchor.side || null, about: anchor.about || null, onChange: anchor.onChange || null, newLine: anchor.newLine || null, status: 'asked', messages: [{ role: 'user', text, at: new Date().toISOString() }], createdAt: new Date().toISOString() };
+    const t = { id, kind: anchor.kind || 'question', commit: anchor.commit, path: anchor.path || null, line: anchor.line || null, startLine: anchor.startLine || null, side: anchor.side || null, about: anchor.about || null, onChange: anchor.onChange || null, newLine: anchor.newLine || null, newStart: anchor.newStart != null ? anchor.newStart : null, newEnd: anchor.newEnd != null ? anchor.newEnd : null, status: 'asked', messages: [{ role: 'user', text, at: new Date().toISOString() }], createdAt: new Date().toISOString() };
     const aboutNote = (anchor.aboutText ? '\n\n(about the comment: "' + anchor.aboutText.replace(/\s+/g, ' ').trim().slice(0, 300) + '")' : '')
-      + (anchor.onChange ? '\n\n(on a line accepted change ' + anchor.onChange + ' wrote, only on the review branch: "' + String(anchor.newLine || '').trim().slice(0, 300) + '")' : '');
+      + (anchor.onChange ? '\n\n(on ' + (anchor.newEnd != null && anchor.newEnd > anchor.newStart ? 'lines ' + (anchor.newStart + 1) + '-' + (anchor.newEnd + 1) : anchor.newStart != null ? 'line ' + (anchor.newStart + 1) : 'a line') + ' of the new lines accepted change ' + anchor.onChange + ' wrote, only on the review branch: "' + String(anchor.newLine || '').trim().slice(0, 600) + '")' : '');
     const shellThreadId = await notifyClaude(t, text + aboutNote, el, t.kind === 'modify' ? 'modify request' : t.kind === 'feedback' ? 'feedback request' : 'page question');
     const ok = await writeThread(id, Object.assign({}, t, { shellThreadId, notifyError: shellThreadId ? null : notifyErr }), true);
     sending = false;
@@ -154,6 +154,19 @@
     const out = Object.values(threads).filter(t => t.about === id && visibleThread(t)).map(t => threadCard(t, el));
     if (openAsk && openAsk.about === id) out.push(askComposer(openAsk, el));
     return out;
+  }
+  // A line an accepted change wrote exists only on the review branch: ? and ✎ (and i / m) on it ask Claude about exactly
+  // that line, or a range of that change's lines, anchored at the change and the indexes of its new lines.
+  const isOvRow = (r, side) => !!r && !!r.dataset && !!r.dataset.chg && !!changes[r.dataset.chg] && (r.matches('tr.ovnew.done') || (r.classList.contains('ovfill') && side === 'RIGHT'));
+  function askOverlay(x, rows, kind) {
+    const rs = rows.slice().sort((a, b) => +a.dataset.ovi - +b.dataset.ovi), lo = +rs[0].dataset.ovi, hi = +rs[rs.length - 1].dataset.ovi;
+    askAbout({ commit: x.commit, commitIdx: current, path: x.path, line: x.line, startLine: x.startLine || null, side: 'RIGHT', kind, onChange: x.id, newStart: lo, newEnd: hi, newLine: rs.map(r => r.dataset.nl).join('\n') });
+  }
+  // Shift+click on an overlay line's button: the range from the cursor's line, when both are new lines of the same change.
+  function ovRangeTo(tr) {
+    const cur = lineOf(current_()); if (!isOvRow(cur, 'RIGHT') || cur.dataset.chg !== tr.dataset.chg || cur === tr) return null;
+    const all = Array.from(tr.closest('tbody').querySelectorAll('tr')).filter(r => isOvRow(r, 'RIGHT') && r.dataset.chg === tr.dataset.chg), i = all.indexOf(cur), k = all.indexOf(tr);
+    return i < 0 || k < 0 ? null : all.slice(Math.min(i, k), Math.max(i, k) + 1);
   }
   function askAbout(anchor) { openAsk = anchor; openComposer = null; editing = null; renderAll(); setTimeout(() => { const t = document.getElementById('ask-ta'); if (t) t.scrollIntoView({ block: 'center' }); }, 0); }
   let comments = {};           // id -> doc
@@ -216,7 +229,7 @@
   function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
   // Unsent text and open composers survive a page reload; a draft goes away when it is sent or cancelled.
-  const draftKey = a => [a.kind || '', a.commit, a.path || '', a.line || '', a.side || '', a.replyTo || '', a.replyToConv || ''].join('|') + (a.about ? '|@' + a.about : '');
+  const draftKey = a => [a.kind || '', a.commit, a.path || '', a.line || '', a.side || '', a.replyTo || '', a.replyToConv || ''].join('|') + (a.about ? '|@' + a.about : '') + (a.onChange ? '|~' + a.onChange + ':' + a.newStart + '-' + a.newEnd : '');
   let drafts = {}; try { drafts = JSON.parse(lsGet('drafts') || '{}') || {}; } catch (e) {}
   const taKey = ta => ta.dataset.draft || ta.id;
   // Each comment or question draft remembers where its composer was, so the queue can reopen it after Esc.
@@ -586,17 +599,31 @@
       const ovRow = (x, s, i) => {
         const tr = document.createElement('tr'), pv = x.status === 'accepting'; tr.className = 'ovnew' + (pv ? ' prev' : ' done');
         // An accepted change is drawn as the plain new version, numbered from the first line it replaces; only a change still being accepted is marked as a preview.
-        const g = pv ? '<td class="num ovg"><span class="ovmark">preview</span></td>' : '<td class="num a">' + ((x.startLine || x.line) + i) + '</td>', code = '<td class="code ' + (pv ? 'ovn' : 'a') + (split ? ' r' : '') + '"><span class="marker">+</span>' + hl(s, lang) + '</td>';
+        const g = pv ? '<td class="num ovg"><span class="ovmark">preview</span></td>' : '<td class="num a"><span class="lbtns"><button class="modbtn" title="Ask Claude to change this line" aria-label="Ask Claude to change this line">✎</button><button class="askbtn" title="Ask Claude about this line" aria-label="Ask Claude about this line">?</button></span>' + ((x.startLine || x.line) + i) + '</td>', code = '<td class="code ' + (pv ? 'ovn' : 'a') + (split ? ' r' : '') + '"><span class="marker">+</span>' + hl(s, lang) + '</td>';
         tr.innerHTML = split ? emptyPair(true) + g + code : (pv ? '<td class="num left ovg"></td>' : '<td class="num left a"></td>') + g + code;
         // Its own id (by change and line) lets the cursor stop on it; the change keeps its PR anchor for comments.
-        tr.dataset.chg = x.id; tr.dataset.nl = s; if (!pv) tr.id = 'ov-' + x.id + '-' + i; return tr;
+        tr.dataset.chg = x.id; tr.dataset.nl = s; tr.dataset.ovi = i; if (!pv) tr.id = 'ov-' + x.id + '-' + i;
+        // Its ? and ✎ ask about exactly this line (Shift+click: the range from the cursor's line of the same change).
+        tr.querySelectorAll('.askbtn, .modbtn').forEach(b => b.onclick = e => { const kind = b.classList.contains('modbtn') ? 'modify' : undefined; const rows = e && e.shiftKey ? ovRangeTo(tr) : null; askOverlay(x, rows || [tr], kind); });
+        return tr;
+      };
+      // Conversations on the new lines of an accepted change hang under the exact line they were asked about.
+      const ovShown = new Set();
+      const ovThreadRow = (x, i, lineEl) => {
+        const convs = Object.values(threads).filter(t => visibleThread(t) && !t.about && t.onChange === x.id && t.newEnd === i);
+        const ask = openAsk && openAsk.onChange === x.id && openAsk.newEnd === i;
+        if (!convs.length && !ask) return null;
+        const ctr = document.createElement('tr'); ctr.className = 'cmt'; const td = document.createElement('td'); td.colSpan = cols; const th = document.createElement('div'); th.className = 'thread';
+        convs.forEach(t => { ovShown.add(t.id); th.appendChild(threadCard(t, lineEl)); });
+        if (ask) th.appendChild(askComposer(openAsk, lineEl));
+        td.appendChild(th); ctr.appendChild(td); return ctr;
       };
       function threadRow(refs, lineEl) {
         const here = fileComments.filter(x => refs.some(r => x.line === r.line && (x.side || 'RIGHT') === r.side));
-        const convs = threadsAt(c.sha, f.path, refs);
+        const convs = threadsAt(c.sha, f.path, refs).filter(t => !ovShown.has(t.id));
         const ghs = ghAt(c.sha, f.path, refs);
         const comp = openComposer && !openComposer.replyTo && openComposer.commitIdx === current && openComposer.path === f.path && refs.some(r => openComposer.line === r.line && openComposer.side === r.side);
-        const ask = openAsk && !openAsk.about && openAsk.commitIdx === current && openAsk.path === f.path && refs.some(r => openAsk.line === r.line && openAsk.side === r.side);
+        const ask = openAsk && !openAsk.about && openAsk.newEnd == null && openAsk.commitIdx === current && openAsk.path === f.path && refs.some(r => openAsk.line === r.line && openAsk.side === r.side);
         const chs = fileChanges.filter(x => refs.some(r => x.line === r.line && (x.side || 'RIGHT') === r.side));
         if (!here.length && !convs.length && !ghs.length && !chs.length && !comp && !ask) return null;
         const ctr = document.createElement('tr'); ctr.className = 'cmt'; const td = document.createElement('td'); td.colSpan = cols; const th = document.createElement('div'); th.className = 'thread';
@@ -636,8 +663,8 @@
         ov.filter(x => x.line === rr.line && !superseded(x)).forEach(x => (x.new || []).forEach((s, i) => {
           // In the split view the new lines fill the right side of the removed lines first, so a replaced line sits beside its replacement.
           const slot = x.status === 'accepted' && (ovSlots[x.id] || [])[i];
-          if (slot) { const r = ovRow(x, s, i), num = r.children[2], code = r.children[3]; slot.children[3].replaceWith(code); slot.children[2].replaceWith(num); slot.classList.add('ovfill'); slot.dataset.chg = x.id; slot.dataset.nl = s; }
-          else tbody.appendChild(ovRow(x, s, i));
+          if (slot) { const r = ovRow(x, s, i), num = r.children[2], code = r.children[3]; slot.children[3].replaceWith(code); slot.children[2].replaceWith(num); slot.classList.add('ovfill'); slot.dataset.chg = x.id; slot.dataset.nl = s; slot.dataset.ovi = i; const tr2 = x.status === 'accepted' && ovThreadRow(x, i, slot); if (tr2) { let at = slot; while (at.nextElementSibling && at.nextElementSibling.classList.contains('cmt')) at = at.nextElementSibling; at.after(tr2); } }
+          else { const r = ovRow(x, s, i); tbody.appendChild(r); const tr2 = x.status === 'accepted' && ovThreadRow(x, i, r); if (tr2) tbody.appendChild(tr2); }
         }));
         const row = threadRow(refs, tr); if (row) tbody.appendChild(row);
       }
@@ -1122,8 +1149,8 @@
   function lineLabel(a) { return a.line ? ':' + (a.startLine ? a.startLine + '-' : '') + a.line : ''; }
   function selRows() {
     const a = selFrom && document.getElementById(selFrom), b = lineOf(current_());
-    if (!a || !b || !b.matches('tr.line') || a === b || a.closest('.file') !== b.closest('.file')) return null;
-    const all = Array.from(a.closest('.file').querySelectorAll('tr.line')), i = all.indexOf(a), k = all.indexOf(b);
+    if (!a || !b || !b.matches('tr.line, tr.ovnew.done') || a === b || a.closest('.file') !== b.closest('.file')) return null;
+    const all = Array.from(a.closest('.file').querySelectorAll('tr.line, tr.ovnew.done')), i = all.indexOf(a), k = all.indexOf(b);
     return all.slice(Math.min(i, k), Math.max(i, k) + 1);
   }
   // An open composer or question on a range keeps it framed until it is sent or closed.
@@ -1133,7 +1160,7 @@
     return rows.length ? rows : null;
   }
   function markSel() {
-    document.querySelectorAll('tr.line.sel').forEach(x => x.classList.remove('sel', 'sel-first', 'sel-last')); document.querySelectorAll('td.scell').forEach(x => x.classList.remove('scell', 'sfirst'));
+    document.querySelectorAll('tr.sel').forEach(x => x.classList.remove('sel', 'sel-first', 'sel-last')); document.querySelectorAll('td.scell').forEach(x => x.classList.remove('scell', 'sfirst'));
     const picked = selRows(), r = picked || openRangeRows() || []; r.forEach(x => x.classList.add('sel')); if (!r.length) return;
     r[0].classList.add('sel-first'); r[r.length - 1].classList.add('sel-last');
     // In the split view the range is framed on its side: the cursor's side while picking, the anchor's side once a composer is open.
@@ -1144,7 +1171,7 @@
   }
   function clearSel() { selFrom = null; selSide = null; markSel(); }
   function extendSel(dir) {
-    const cur = lineOf(current_()); if (!selFrom && cur && cur.matches('tr.line')) { selFrom = cur.id; selSide = effSide(cur); }
+    const cur = lineOf(current_()); if (!selFrom && cur && cur.matches('tr.line, tr.ovnew.done')) { selFrom = cur.id; selSide = effSide(cur); }
     moveCursor(dir); markSel();
   }
   const sideLines = (tr, side) => Array.from(tr.querySelectorAll('.addbtn')).filter(x => x.dataset.side === side).map(x => parseInt(x.dataset.line, 10));
@@ -1176,14 +1203,23 @@
     // A line an accepted change wrote exists only on the review branch: i and m talk to Claude about it (anchored at the
     // change's lines), while a GitHub comment has to wait until the branch is pushed to the PR. In the split view the
     // filled right side of a removed line counts as that new line.
-    const onNew = cur && cur.dataset && cur.dataset.chg && changes[cur.dataset.chg] && (cur.matches('tr.ovnew') || (viewMode === 'split' && cur.classList.contains('ovfill') && effSide(cur) === 'RIGHT'));
-    if (onNew) {
-      if (sel === '.addbtn') { toast('This line is only on the review branch: comment on it after Push to the PR'); return; }
-      const x = changes[cur.dataset.chg];
-      askAbout({ commit: x.commit, commitIdx: current, path: x.path, line: x.line, startLine: x.startLine || null, side: 'RIGHT', kind: sel === '.modbtn' ? 'modify' : undefined, onChange: x.id, newLine: cur.dataset.nl }); return;
+    // A range picked over them asks about exactly those lines; it cannot mix them with the PR's own lines.
+    const picked = selRows(), pSide = picked ? (viewMode === 'split' ? (selSide || effSide(cur) || 'RIGHT') : 'RIGHT') : null;
+    const ovSide = viewMode === 'split' ? (effSide(cur) || 'RIGHT') : 'RIGHT';
+    const ovRows = picked ? picked.filter(r => isOvRow(r, pSide)) : isOvRow(cur, ovSide) ? [cur] : [];
+    if (ovRows.length) {
+      if (sel === '.addbtn') { toast('These lines are only on the review branch: comment on them on GitHub after Push to the PR, or ask Claude with i'); return; }
+      const others = picked ? picked.filter(r => !isOvRow(r, pSide) && (viewMode !== 'split' || rowHas(r, pSide))) : [];
+      if (others.length || ovRows.some(r => r.dataset.chg !== ovRows[0].dataset.chg)) { toast('A range cannot mix the lines of an accepted change with other lines'); return; }
+      if (sel === '.askbtn' && !picked) {
+        // As on any line, i continues the conversation already open under it.
+        const cmt = cur.nextElementSibling, chat = cmt && cmt.classList.contains('cmt') ? Array.from(cmt.querySelectorAll('.thread > .chat')).filter(c => !c.querySelector('[data-act="restore"]')).pop() : null;
+        const ta = chat && chat.querySelector('.followup textarea'); if (ta) { ta.scrollIntoView({ block: 'center' }); ta.focus(); return; }
+      }
+      clearSel(); askOverlay(changes[ovRows[0].dataset.chg], ovRows, sel === '.modbtn' ? 'modify' : undefined); return;
     }
     if (!cur || !cur.matches('tr.line')) { toast('Select a line first (j / l)'); return; }
-    const rows = selRows(), rangeSide = rows && viewMode === 'split' ? (selSide || effSide(cur) || 'RIGHT') : null;
+    const rows = picked, rangeSide = rows && viewMode === 'split' ? (selSide || effSide(cur) || 'RIGHT') : null;
     const row = rows ? (rangeSide ? rows.filter(x => rowHas(x, rangeSide)).pop() || rows[rows.length - 1] : rows[rows.length - 1]) : cur;
     // i continues the conversation already open on this line (the selected one, else the latest) instead of starting another.
     if (sel === '.askbtn' && !rows) {
@@ -1221,7 +1257,7 @@
     else lineAction('.addbtn');
   }
   document.addEventListener('click', e => {
-    const el = e.target.closest && e.target.closest('#files tr.line, #files .file-head, #files tr.hunk'); if (!el || !el.id) return;
+    const el = e.target.closest && e.target.closest('#files tr.line, #files tr.ovnew.done, #files .file-head, #files tr.hunk'); if (!el || !el.id) return;
     const td = e.target.closest('td'); if (isSplitRow(el) && td && el.children.length >= 4) { const sd = Array.from(el.children).indexOf(td) < 2 ? 'LEFT' : 'RIGHT'; if (rowHas(el, sd)) cursorSide = sd; }
     setCursor(el, false); toDiff();
   });
