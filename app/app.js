@@ -1394,7 +1394,8 @@
       n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), v: () => toggleViewed(), t: () => showKeys(document.getElementById('keys-panel').hidden), f: () => toggleFeedback(), d: () => cardAction(['[data-act="dismiss"], .chat [data-act="restore"]', '[data-act="reject"], .card > .actions [data-act="restore"]', '[data-act="hidedisc"], [data-act="showdisc"]', '.change [data-act="decline"], .change [data-act="restorechg"]'], 'Nothing to dismiss here'), q: () => cardAction(['[data-act="approve"]', '.change [data-act="accept"]'], 'No proposed comment or change here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), c: () => toggleTop(), Enter: () => enterCursor()
     };
     const act = keys[e.key] || (e.key.length === 1 ? keys[e.key.toLowerCase()] : null);
-    if (act) { e.preventDefault(); if (e.key.length === 1) toDiff(); act(); }
+    // Letter keys bring the cursor back to the diff, except v on the commit stepper, which marks that commit viewed.
+    if (act) { e.preventDefault(); if (e.key.length === 1 && !(region === 'commits' && e.key.toLowerCase() === 'v')) toDiff(); act(); }
   });
 
   // The mouse pointer hides after two idle seconds or on a key press, and comes back when the mouse moves.
