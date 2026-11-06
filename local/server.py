@@ -301,6 +301,30 @@ def post_conv_replies(ids):
         except Exception as e:
             commit_writes([{'op': 'update', 'col': 'comments', 'id': i, 'data': {'githubError': str(e)[:300]}}])
 
+def gh_resolve(root_id, resolve):
+    """Resolves (or reopens) one reviewer thread on GitHub, only when the user asks from the page. Returns isResolved."""
+    t = next((t for t in REVIEW['data']['gh']['threads'] if t.get('rootCommentId') == root_id), None)
+    if not t: raise ValueError('no such reviewer thread on this PR')
+    q = '''query($o:String!,$n:String!,$p:Int!,$c:String){repository(owner:$o,name:$n){pullRequest(number:$p){
+     reviewThreads(first:100,after:$c){pageInfo{hasNextPage endCursor} nodes{id comments(first:1){nodes{databaseId}}}}}}}'''
+    tid, cur = None, None
+    while not tid:
+        args = ['gh', 'api', 'graphql', '-f', 'query=' + q, '-f', f'o={OWNER}', '-f', f'n={NAME}', '-F', f'p={N}'] + (['-f', f'c={cur}'] if cur else [])
+        rt = json.loads(run(*args))['data']['repository']['pullRequest']['reviewThreads']
+        tid = next((x['id'] for x in rt['nodes'] if x['comments']['nodes'] and x['comments']['nodes'][0]['databaseId'] == root_id), None)
+        if tid or not rt['pageInfo']['hasNextPage']: break
+        cur = rt['pageInfo']['endCursor']
+    if not tid: raise RuntimeError('GitHub has no review thread starting with that comment')
+    m = 'resolveReviewThread' if resolve else 'unresolveReviewThread'
+    r = json.loads(run('gh', 'api', 'graphql', '-f', f'query=mutation($t:ID!){{{m}(input:{{threadId:$t}}){{thread{{isResolved}}}}}}', '-f', f't={tid}'))
+    if r.get('errors'): raise RuntimeError('; '.join(e.get('message', '') for e in r['errors']))
+    state = r['data'][m]['thread']['isResolved']
+    t['resolved'] = state
+    try: json.dump(REVIEW['data']['gh'], open(os.path.join(STATE, 'gh.json'), 'w'))
+    except OSError: pass
+    log('github thread', root_id, 'resolved' if state else 'reopened')
+    return state
+
 # ---- the review branch: accepted changes, on the user's own PR -----------------------------------------------------
 def wgit(*a, check=True, env=None): return git(*a, cwd=WT, check=check, env=env)
 
@@ -423,6 +447,11 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, peek_inbox(float(body.get('wait') or 0)))
             if self.path == '/api/inbox':
                 return self.send(200, take_inbox(float(body.get('wait') or 0)))
+            if self.path == '/api/ghresolve':
+                try: return self.send(200, {'resolved': gh_resolve(int(body['rootCommentId']), bool(body.get('resolve')))})
+                except Exception as e:
+                    log('github resolve failed', body.get('rootCommentId'), e)
+                    return self.send(502, {'error': str(e)[:300], 'code': 'github_failed'})
             if self.path == '/api/claude':
                 return self.send(200, {'threadId': route(body.get('threadId'), body.get('text') or '')})
         except Exception as e:

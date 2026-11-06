@@ -26,7 +26,7 @@
   }
   const isReply = x => !!(x.replyTo || x.replyToConv);
   const ghOpen = new Set(), ghClosed = new Set(); // per-view expand state of reviewer threads, kept across re-renders
-  // A reviewer thread can be marked resolved on this page only (d or its button; localStorage): GitHub is not changed.
+  // Outside the local app a reviewer thread can be marked resolved on this page only (d or its button; localStorage).
   const ghLocalRes = t => lsGet('ghres:' + t.id) === '1';
   const ghRes = t => !!t.resolved || ghLocalRes(t);
   function ghThreadCard(t) {
@@ -45,7 +45,8 @@
       const b = document.createElement('button'); b.className = 'btn small'; b.textContent = 'Reply (queue to your GitHub draft)';
       b.onclick = () => { openComposer = { commit: t.commit, commitIdx: current, path: t.path, line: t.line, side: t.side, replyTo: t.id }; editing = null; renderAll(); };
       const row = document.createElement('div'); row.className = 'actions'; row.appendChild(b);
-      if (!t.resolved) {
+      if (R.cfg.local) row.appendChild(ghResolveBtn(t));
+      else if (!t.resolved) {
         const on = ghLocalRes(t), r = document.createElement('button'); r.className = 'btn small'; r.dataset.act = on ? 'ghunresolve' : 'ghresolve';
         r.textContent = on ? 'Mark open' : 'Mark resolved'; r.title = 'On this page only; GitHub is not changed';
         r.onclick = () => { lsSet('ghres:' + t.id, on ? '0' : '1'); if (on) { ghClosed.delete(t.id); } else { ghOpen.delete(t.id); ghClosed.add(t.id); } renderAll(); toast(on ? 'Thread marked open' : 'Thread marked resolved on this page'); };
@@ -54,6 +55,28 @@
       d.appendChild(row);
     }
     return d;
+  }
+  // In the local app the user's resolve / unresolve (d or the button) also goes to GitHub through the server. The page
+  // state changes at once; if GitHub refuses, a resolve stays marked on this page only and the error is shown.
+  function ghResolveBtn(t) {
+    const on = ghRes(t), r = document.createElement('button'); r.className = 'btn small'; r.dataset.act = on ? 'ghunresolve' : 'ghresolve';
+    r.textContent = on ? 'Unresolve' : 'Resolve'; r.title = (on ? 'Reopen' : 'Resolve') + ' this thread here and on GitHub';
+    r.onclick = async () => {
+      if (on && !t.resolved) { lsSet('ghres:' + t.id, '0'); ghClosed.delete(t.id); renderAll(); toast('Thread marked open'); return; } // only resolved on this page
+      if (on) { ghClosed.delete(t.id); } else { lsSet('ghres:' + t.id, '1'); ghOpen.delete(t.id); ghClosed.add(t.id); renderAll(); }
+      toast((on ? 'Reopening' : 'Resolving') + ' on GitHub…');
+      try {
+        const res = await fetch('api/ghresolve', { method: 'POST', headers: { 'content-type': 'application/json', 'x-review': '1' }, body: JSON.stringify({ rootCommentId: t.rootCommentId, resolve: !on }) });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(j.error || String(res.status));
+        t.resolved = !!j.resolved; lsSet('ghres:' + t.id, '0'); renderAll();
+        toast('Thread ' + (t.resolved ? 'resolved' : 'reopened') + ' on GitHub');
+      } catch (e) {
+        renderAll();
+        toast('GitHub ' + (on ? 'unresolve' : 'resolve') + ' failed: ' + e.message + (on ? '' : ' (marked resolved on this page only)'));
+      }
+    };
+    return r;
   }
   function cleanTextOf(h) { const d = document.createElement('div'); d.innerHTML = cleanHTML(h || ''); return (d.textContent || '').replace(/\s+/g, ' ').trim(); }
   function ghAt(sha, path, refs) { return GH.threads.filter(t => t.commit === sha && t.path === path && (refs ? refs.some(r => t.line === r.line && t.side === r.side) : !t.line)); }
@@ -1358,7 +1381,7 @@
     // A re-render replaces the card; act on the one now on the page.
     if (el.id) el = document.getElementById(el.id) || el;
     const b = el.querySelector(':scope > .actions [data-act="ghresolve"], :scope > .actions [data-act="ghunresolve"]');
-    if (b) b.click(); else toast('Nothing to resolve here (already resolved on GitHub?)');
+    if (b) b.click(); else toast('Nothing to resolve here');
     return true;
   }
   function cardAction(sel, none) {
