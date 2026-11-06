@@ -17,7 +17,7 @@ Then loop for as long as the server runs:
 
 - `python3 -I $R/local/store.py --port $P next --wait 540` (Bash timeout 600000). It blocks until the page sends something and prints one JSON line per request (`{"threadId", "text", "at"}`, `text` starting with the `[<kind> <id>]` prefixes of workflow section 4), or `idle` after the wait. Handle every request it printed, then call it again at once. Never end your turn on `idle`.
 - It prints `server stopped` (exit code 3) once the server is gone, and a `[pr closed]` request when the PR was closed: then end with the line `DONE <reason>`.
-- After about 30 handled requests, or when your context grows long, hand over: write `$ST/notes.md` (what is seeded, decisions the user made, anything half done) and end with the line `HANDOFF`. The session that started you spawns a fresh agent with the same brief.
+- After about 30 handled requests, or once your context is really long (well past 150k tokens), hand over. Idle waits never count: an agent with no requests keeps waiting for as long as the server runs, however many `idle` lines it gets. To hand over, write `$ST/notes.md` (what is seeded, decisions the user made, anything half done) and end with the line `HANDOFF`. The session that started you spawns a fresh agent with the same brief.
 - Your final message is only that one line; the user never reads anything else you write.
 
 ## Differences from the workflow
