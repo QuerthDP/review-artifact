@@ -341,7 +341,7 @@
       const tip = kinds.filter(k => k[0]).map(k => k[0] + ' ' + (k[0] > 1 ? k[3] : k[2]));
       const viewed = isCommitViewed(c); if (viewed) tip.unshift('all files viewed');
       const b = document.createElement('button'); b.className = 'step' + (i === current ? ' active' : '') + (viewed ? ' viewed' : ''); b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', i === current);
-      b.innerHTML = '<span class="n">' + (i + 1) + '/' + COMMITS.length + ' · ' + esc(c.short) + (isDropped(c.sha) ? ' · <span class="dropmark">dropped</span>' : '') + (viewed ? ' · <span class="viewmark">✓ viewed</span>' : '') + '</span><span class="s">' + esc((Object.values(changes).find(x => x.commit === c.sha && x.op === 'reword' && x.status === 'accepted' && x.message) || {}).message ? String(Object.values(changes).find(x => x.commit === c.sha && x.op === 'reword' && x.status === 'accepted' && x.message).message).split('\n')[0] : c.subject) + '</span><span class="dots">' + dots + '</span>';
+      b.innerHTML = '<span class="n">' + (i + 1) + '/' + COMMITS.length + ' · ' + esc(c.short) + (isDropped(c.sha) ? ' · <span class="dropmark">dropped</span>' : '') + '</span>' + (viewed ? '<span class="viewmark" aria-hidden="true">✓</span>' : '') + '<span class="s">' + esc((Object.values(changes).find(x => x.commit === c.sha && x.op === 'reword' && x.status === 'accepted' && x.message) || {}).message ? String(Object.values(changes).find(x => x.commit === c.sha && x.op === 'reword' && x.status === 'accepted' && x.message).message).split('\n')[0] : c.subject) + '</span><span class="dots">' + dots + '</span>';
       if (tip.length) b.title = tip.join(' · ');
       b.onclick = () => go(i); el.appendChild(b);
     });

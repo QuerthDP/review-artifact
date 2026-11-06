@@ -83,8 +83,11 @@ header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; b
 .step .n { font-size: 11px; color: var(--muted); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .step .s { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .step.active { border-color: var(--accent); background: var(--accent-soft); }
+.step { position: relative; }
+.step.viewed { border-color: var(--posted); box-shadow: inset 0 0 0 1px var(--posted); }
 .step.viewed .s { color: var(--muted); }
-.step .viewmark { color: var(--posted); }
+.step.viewed .n { padding-right: 18px; }
+.step .viewmark { position: absolute; top: 3px; right: 6px; font-size: 16px; font-weight: 700; line-height: 1; color: var(--posted); }
 .step .dots { display: flex; gap: 3px; overflow: hidden; }
 .step .dot { flex: 0 0 auto; }
 .dot { width: 7px; height: 7px; border-radius: 50%; }
