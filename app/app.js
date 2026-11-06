@@ -1281,9 +1281,12 @@
   // v marks the file holding the cursor as viewed, or unmarks it; a viewed file collapses, so the cursor moves to its
   // header, and an unmarked one expands again.
   // On the commit stepper, v marks every file of the selected commit as viewed, or unmarks them all when all are viewed.
+  // A stepper button with focus (clicked or reached with Tab) counts as the commit stepper too, for that button's commit.
+  const focusedStep = () => { const a = document.activeElement; return a && a.matches && a.matches('#stepper .step') ? Array.from(document.querySelectorAll('#stepper .step')).indexOf(a) : -1; };
   function toggleViewed() {
-    if (region === 'commits') {
-      const c = COMMITS[current]; if (!c || !c.files || !c.files.length) { toast('This commit has no files'); return; }
+    const fs = focusedStep();
+    if (region === 'commits' || fs >= 0) {
+      const c = COMMITS[fs >= 0 ? fs : current]; if (!c || !c.files || !c.files.length) { toast('This commit has no files'); return; }
       const on = !isCommitViewed(c);
       c.files.forEach(f => lsSet('viewed:' + c.sha + ':' + f.path, on ? '1' : '0'));
       renderAll(); toast(on ? 'Commit marked as viewed' : 'Commit marked as not viewed'); return;
@@ -1318,7 +1321,8 @@
   window.addEventListener('wheel', () => { lastCmt = null; }, { passive: true });
   window.addEventListener('touchmove', () => { lastCmt = null; }, { passive: true });
   function stepComment(dir) {
-    const rows = Array.from(document.querySelectorAll('tr.cmt, .general .card')).filter(r => !r.closest('[hidden]') && !r.closest('.collapsed'));
+    // Each GitHub reviewer thread is a stop of its own, which takes the cursor; a row holding only such threads is not.
+    const rows = Array.from(document.querySelectorAll('tr.cmt, .general .card, .thread > .ghthread, .general > .ghthread')).filter(r => !r.closest('[hidden]') && !r.closest('.collapsed') && (!r.matches('tr.cmt') || r.querySelector('.thread > :not(.ghthread)')));
     if (!rows.length) return;
     // Step from the comment we last jumped to; centring can fail near the page end, so the viewport midpoint alone would repeat it.
     const top = r => r.getBoundingClientRect().top + window.scrollY;
@@ -1331,6 +1335,7 @@
     }
     if (idx < 0 || idx >= rows.length) idx = dir > 0 ? 0 : rows.length - 1;
     lastCmt = rows[idx];
+    if (rows[idx].matches('.ghthread')) { if (rows[idx].id) setCursor(rows[idx], false); rows[idx].scrollIntoView({ block: 'center' }); flashRow(rows[idx]); return; }
     const ln = skipOv(rows[idx].previousElementSibling, -1); if (ln && ln.matches && ln.matches('tr.line')) setCursor(ln, false);
     rows[idx].scrollIntoView({ block: 'center' }); flashRow(ln || rows[idx]);
   }
@@ -1396,7 +1401,7 @@
     };
     const act = keys[e.key] || (e.key.length === 1 ? keys[e.key.toLowerCase()] : null);
     // Letter keys bring the cursor back to the diff, except v on the commit stepper, which marks that commit viewed.
-    if (act) { e.preventDefault(); if (e.key.length === 1 && !(region === 'commits' && e.key.toLowerCase() === 'v')) toDiff(); act(); }
+    if (act) { e.preventDefault(); if (e.key.length === 1 && !((region === 'commits' || focusedStep() >= 0) && e.key.toLowerCase() === 'v')) toDiff(); act(); }
   });
 
   // The mouse pointer hides after two idle seconds or on a key press, and comes back when the mouse moves.
