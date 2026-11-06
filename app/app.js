@@ -420,14 +420,38 @@
   const commitChanges = sha => Object.values(changes).filter(x => x.commit === sha && !x.path && x.op && x.status !== 'landed');
   // A commit an accepted change dropped from the review branch: marked next to its title and in the stepper.
   const isDropped = sha => Object.values(changes).some(x => x.commit === sha && !x.path && x.op === 'drop' && x.status === 'accepted');
+  // A change shows only what it changes: a line diff of old and new, with two lines of context around each edit and the
+  // unchanged runs between them folded into one line, so a 3-line edit of a 200-line block reads as 3 lines.
+  function lineDiff(o, n) {
+    const m = o.length, k = n.length;
+    if (m * k > 4000000) return o.map(s => ['d', s]).concat(n.map(s => ['a', s]));
+    const L = Array.from({ length: m + 1 }, () => new Uint32Array(k + 1));
+    for (let i = m - 1; i >= 0; i--) for (let j = k - 1; j >= 0; j--) L[i][j] = o[i] === n[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    const out = []; let i = 0, j = 0;
+    while (i < m && j < k) { if (o[i] === n[j]) { out.push(['c', o[i]]); i++; j++; } else if (L[i + 1][j] >= L[i][j + 1]) out.push(['d', o[i++]]); else out.push(['a', n[j++]]); }
+    while (i < m) out.push(['d', o[i++]]); while (j < k) out.push(['a', n[j++]]);
+    return out;
+  }
+  function diffRows(o, n, fmt, ctx) {
+    const ops = lineDiff(o, n), keep = ops.map(() => false);
+    ops.forEach((op, i) => { if (op[0] !== 'c') for (let x = Math.max(0, i - ctx); x <= Math.min(ops.length - 1, i + ctx); x++) keep[x] = true; });
+    let html = '', skipped = 0;
+    const flush = () => { if (skipped) html += '<div class="md-n">⋯ ' + skipped + ' unchanged line' + (skipped > 1 ? 's' : '') + '</div>'; skipped = 0; };
+    ops.forEach((op, i) => {
+      if (!keep[i]) { skipped++; return; }
+      flush(); const cls = op[0] === 'd' ? 'md-d' : op[0] === 'a' ? 'md-a' : 'md-c', mk = op[0] === 'd' ? '−' : op[0] === 'a' ? '+' : ' ';
+      html += '<div class="' + cls + '"><span class="marker">' + mk + '</span>' + fmt(op[1]) + '</div>';
+    });
+    flush(); return html;
+  }
   function miniDiff(ch) {
     if (!ch.path && ch.op) {
       const cm = COMMITS.find(c => c.sha === ch.commit) || {}, oldMsg = ch.oldMessage || [cm.subject, cm.body].filter(Boolean).join('\n\n');
       if (ch.op === 'drop') return '<div class="minidiff msgdiff"><div class="md-d"><span class="marker">−</span>' + esc(cm.subject || oldMsg.split('\n')[0]) + '</div><div class="md-n">(the whole commit is dropped)</div></div>';
-      return '<div class="minidiff msgdiff">' + oldMsg.split('\n').map(l => '<div class="md-d"><span class="marker">−</span>' + esc(l) + '</div>').join('') + String(ch.message || '').split('\n').map(l => '<div class="md-a"><span class="marker">+</span>' + esc(l) + '</div>').join('') + '</div>';
+      return '<div class="minidiff msgdiff">' + diffRows(oldMsg.split('\n'), String(ch.message || '').split('\n'), esc, 2) + '</div>';
     }
     const lang = langOf(ch.path || ''), o = ch.old || [], n = ch.new || [];
-    return '<div class="minidiff">' + o.map(s => '<div class="md-d"><span class="marker">−</span>' + hl(s, lang) + '</div>').join('') + n.map(s => '<div class="md-a"><span class="marker">+</span>' + hl(s, lang) + '</div>').join('') + (n.length ? '' : '<div class="md-n">(the lines are deleted)</div>') + '</div>';
+    return '<div class="minidiff">' + diffRows(o, n, x => hl(x, lang), 2) + (n.length ? '' : '<div class="md-n">(the lines are deleted)</div>') + '</div>';
   }
   const chgOpen = new Set(), chgBusy = new Set(); // settled cards the viewer unfolded; accepts in flight
   // Accepting is instant: the card turns accepted and the overlay shows at once. On the viewer's PR, Claude then folds it onto the
