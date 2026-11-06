@@ -809,6 +809,13 @@
   document.addEventListener('focusin', e => { if (e.target.tagName === 'TEXTAREA' && e.target.id) lsSet('focus', e.target.id); });
   document.addEventListener('focusout', e => { if (e.target.tagName === 'TEXTAREA') setTimeout(() => { const a = document.activeElement; if (document.hasFocus() && (!a || a.tagName !== 'TEXTAREA')) lsSet('focus', ''); }, 0); });
   ['input', 'keyup', 'click'].forEach(ev => document.addEventListener(ev, e => { if (e.target.tagName === 'TEXTAREA') { focusPos = e.target.selectionStart; lsSet('focuspos', String(focusPos)); } }));
+  // Sending a message (or saving a comment) ends the typing: the box loses focus and is not focused again by the re-render,
+  // so the keyboard shortcuts work right away.
+  const SEND_BTNS = '#ask-send, #composer-save, [data-act="followup"], [data-act="sendnote"], [data-act="saveedit"]';
+  document.addEventListener('click', e => {
+    if (!e.target.closest || !e.target.closest(SEND_BTNS)) return;
+    lsSet('focus', ''); setTimeout(() => { const a = document.activeElement; if (a && a.tagName === 'TEXTAREA' && a.blur) a.blur(); lsSet('focus', ''); }, 0);
+  }, true);
   function restoreFocus() {
     const id = lsGet('focus'), ta = id && document.getElementById(id), a = document.activeElement;
     if (!ta || a === ta || (a && a.tagName === 'TEXTAREA')) return;
