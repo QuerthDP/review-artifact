@@ -183,13 +183,22 @@ tr.kcur td:first-child { box-shadow: inset 3px 0 0 var(--accent), inset 0 2px 0 
 table.split tr.line.kcur td, table.split tr.ovnew.kcur td { box-shadow: none; }
 table.split tr.kcur:not(.sel) td.kcell { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
 table.split tr.kcur:not(.sel) td.kcell.kfirst { box-shadow: inset 3px 0 0 var(--accent), inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
-tr.line.sel td, tr.line.sel.kcur td { box-shadow: none; }
-tr.line.sel td:first-child, tr.line.sel.kcur td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
-tr.line.sel.sel-first td { box-shadow: inset 0 2px 0 var(--accent); }
-tr.line.sel.sel-last td { box-shadow: inset 0 -2px 0 var(--accent); }
-tr.line.sel.sel-first.sel-last td { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
-tr.line.sel.sel-first td:first-child { box-shadow: inset 3px 0 0 var(--accent), inset 0 2px 0 var(--accent); }
-tr.line.sel.sel-last td:first-child { box-shadow: inset 3px 0 0 var(--accent), inset 0 -2px 0 var(--accent); }
+table:not(.split) tr.line.sel td, table:not(.split) tr.line.sel.kcur td { box-shadow: none; }
+table:not(.split) tr.line.sel td:first-child, table:not(.split) tr.line.sel.kcur td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+table:not(.split) tr.line.sel.sel-first td { box-shadow: inset 0 2px 0 var(--accent); }
+table:not(.split) tr.line.sel.sel-last td { box-shadow: inset 0 -2px 0 var(--accent); }
+table:not(.split) tr.line.sel.sel-first.sel-last td { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+table:not(.split) tr.line.sel.sel-first td:first-child { box-shadow: inset 3px 0 0 var(--accent), inset 0 2px 0 var(--accent); }
+table:not(.split) tr.line.sel.sel-last td:first-child { box-shadow: inset 3px 0 0 var(--accent), inset 0 -2px 0 var(--accent); }
+/* Split view: a range frames only the side it was picked on (the cells marked scell; sfirst holds the left bar). */
+table.split tr.line.sel td { box-shadow: none; }
+table.split tr.line.sel td.scell.sfirst { box-shadow: inset 3px 0 0 var(--accent); }
+table.split tr.line.sel.sel-first td.scell { box-shadow: inset 0 2px 0 var(--accent); }
+table.split tr.line.sel.sel-last td.scell { box-shadow: inset 0 -2px 0 var(--accent); }
+table.split tr.line.sel.sel-first.sel-last td.scell { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+table.split tr.line.sel.sel-first td.scell.sfirst { box-shadow: inset 3px 0 0 var(--accent), inset 0 2px 0 var(--accent); }
+table.split tr.line.sel.sel-last td.scell.sfirst { box-shadow: inset 3px 0 0 var(--accent), inset 0 -2px 0 var(--accent); }
+table.split tr.line.sel.sel-first.sel-last td.scell.sfirst { box-shadow: inset 3px 0 0 var(--accent), inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
 #stepper .step.qcur { outline: 2px solid var(--accent); outline-offset: 1px; }
 .xbtns { display: inline-flex; gap: 4px; margin-right: 8px; vertical-align: middle; }
 .xbtn { border: 1px solid var(--line); background: var(--panel); color: var(--accent, var(--fg)); border-radius: 4px; padding: 0 6px; font: inherit; font-size: 11px; cursor: pointer; line-height: 18px; }

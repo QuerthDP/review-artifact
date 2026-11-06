@@ -1047,7 +1047,7 @@
   // ← / → on a split line move the cursor to that side; with nowhere to go, the keys keep moving between the diff and the queue.
   function sideKey(side) {
     const cur = region === 'diff' && current_(); if (!isSplitRow(cur) || effSide(cur) === side || !rowHas(cur, side)) return false;
-    cursorSide = side; applyCursor(); return true;
+    cursorSide = side; applyCursor(); markSel(); return true;
   }
   function setCursor(el, scroll) {
     if (!el || !el.id) return; cursorId = el.id; applyCursor(); savePos(); if (scroll === false) return;
@@ -1121,7 +1121,16 @@
     const rows = []; for (let n = a.startLine; n <= a.line; n++) { const tr = document.querySelector('[data-ids~="' + rowId(current, a.path, n, a.side || 'RIGHT') + '"]'); if (tr && rows.indexOf(tr) < 0) rows.push(tr); }
     return rows.length ? rows : null;
   }
-  function markSel() { document.querySelectorAll('tr.line.sel').forEach(x => x.classList.remove('sel', 'sel-first', 'sel-last')); const r = selRows() || openRangeRows() || []; r.forEach(x => x.classList.add('sel')); if (r.length) { r[0].classList.add('sel-first'); r[r.length - 1].classList.add('sel-last'); } }
+  function markSel() {
+    document.querySelectorAll('tr.line.sel').forEach(x => x.classList.remove('sel', 'sel-first', 'sel-last')); document.querySelectorAll('td.scell').forEach(x => x.classList.remove('scell', 'sfirst'));
+    const picked = selRows(), r = picked || openRangeRows() || []; r.forEach(x => x.classList.add('sel')); if (!r.length) return;
+    r[0].classList.add('sel-first'); r[r.length - 1].classList.add('sel-last');
+    // In the split view the range is framed on its side: the cursor's side while picking, the anchor's side once a composer is open.
+    if (viewMode !== 'split') return;
+    const open = !picked && [openComposer, openAsk].find(x => x && x.startLine && x.path && x.commitIdx === current);
+    const side = open ? (open.side || 'RIGHT') : (effSide(lineOf(current_())) || cursorSide), k = side === 'LEFT' ? 0 : 2;
+    r.forEach(x => { const tds = x.children; if (tds.length < 4) return; tds[k].classList.add('scell', 'sfirst'); tds[k + 1].classList.add('scell'); });
+  }
   function clearSel() { selFrom = null; markSel(); }
   function extendSel(dir) {
     const cur = lineOf(current_()); if (!selFrom && cur && cur.matches('tr.line')) selFrom = cur.id;
