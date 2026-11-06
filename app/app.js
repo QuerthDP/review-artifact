@@ -303,14 +303,14 @@
       const cs = byCommit(c.sha);
       const p = cs.filter(x => x.status === 'proposed').length, q = cs.filter(x => x.status === 'queued').length;
       // Besides Claude's comments, the dots show what still needs the viewer on this commit: changes to decide (amber square),
-      // accepted changes not yet on the PR (amber outline), conversations with Claude (teal; an outline while Claude has not
-      // answered) and open reviewer threads (blue). The tooltip spells the counts out.
+      // conversations with Claude (teal; an outline while Claude has not answered) and open reviewer threads (blue). Changes
+      // already decided are not counted. The tooltip spells the counts out.
       const chs = Object.values(changes).filter(x => x.commit === c.sha);
-      const decide = chs.filter(x => x.status === 'proposed' || x.status === 'failed').length, acc = chs.filter(x => x.status === 'accepted' || x.status === 'accepting').length;
+      const decide = chs.filter(x => x.status === 'proposed' || x.status === 'failed').length;
       const ths = Object.values(threads).filter(t => t.commit === c.sha && t.kind !== 'feedback' && !t.dismissed);
       const wait = ths.filter(t => t.status !== 'answered').length, conv = ths.length - wait;
       const gho = GH.threads.filter(t => t.commit === c.sha && !t.resolved).length;
-      const kinds = [[p, 'proposed', 'proposed comment', 'proposed comments'], [q, 'queued', 'queued comment', 'queued comments'], [decide, 'chg', 'change to decide', 'changes to decide'], [acc, 'acc', 'accepted change not on the PR yet', 'accepted changes not on the PR yet'], [wait, 'wait', 'question waiting for Claude', 'questions waiting for Claude'], [conv, 'conv', 'conversation with Claude', 'conversations with Claude'], [gho, 'gh', 'open reviewer thread', 'open reviewer threads']];
+      const kinds = [[p, 'proposed', 'proposed comment', 'proposed comments'], [q, 'queued', 'queued comment', 'queued comments'], [decide, 'chg', 'change to decide', 'changes to decide'], [wait, 'wait', 'question waiting for Claude', 'questions waiting for Claude'], [conv, 'conv', 'conversation with Claude', 'conversations with Claude'], [gho, 'gh', 'open reviewer thread', 'open reviewer threads']];
       const dots = kinds.map(k => ('<span class="dot ' + k[1] + '"></span>').repeat(Math.min(k[0], 8))).join('');
       const tip = kinds.filter(k => k[0]).map(k => k[0] + ' ' + (k[0] > 1 ? k[3] : k[2]));
       const b = document.createElement('button'); b.className = 'step' + (i === current ? ' active' : ''); b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', i === current);
