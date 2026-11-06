@@ -133,7 +133,9 @@ def commit_writes(writes):
     return ok
 
 def app_version():
-    return str(max(os.path.getmtime(os.path.join(APP, f)) for f in ('index.html', 'app.js', 'loader.js')))
+    # The last commit touching the page code: a fix reaches open tabs once it is committed, not on every save.
+    try: return subprocess.run(['git', '-C', R, 'log', '-1', '--format=%H', '--', 'app'], capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError): return ''
 
 def snapshot():
     return {'version': DB['version'], 'reviewVersion': REVIEW.get('reviewVersion'), 'appVersion': app_version(), 'docs': DB['docs'], 'docVersions': DB['docVersions']}
@@ -159,7 +161,7 @@ def build():
     log('built', head[:10], 'base', base[:10])
 
 def watch_app():
-    # A fix to the page code (feedback) reaches open tabs at once: wake the long poll, which reloads the page.
+    # A committed fix to the page code (feedback) reaches open tabs at once: wake the long poll, which reloads the page.
     seen = app_version()
     while True:
         time.sleep(2)
