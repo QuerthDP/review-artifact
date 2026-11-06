@@ -21,6 +21,7 @@
   function apply(next) {
     if (!next || next.version <= state.version) return;
     if (next.reviewVersion !== review.reviewVersion) { location.reload(); return; } // a new PR head: reload its data
+    if (next.appVersion && next.appVersion !== review.appVersion) { location.reload(); return; } // new page code
     const prev = state.docs; state = next;
     COLS.forEach(c => { if (JSON.stringify(prev[c] || {}) !== JSON.stringify(next.docs[c] || {})) subs[c].forEach(fn => fn(snap(c))); });
   }

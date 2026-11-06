@@ -132,8 +132,11 @@ def commit_writes(writes):
         DB['version'] += 1; save(); lock.notify_all()
     return ok
 
+def app_version():
+    return str(max(os.path.getmtime(os.path.join(APP, f)) for f in ('index.html', 'app.js', 'loader.js')))
+
 def snapshot():
-    return {'version': DB['version'], 'reviewVersion': REVIEW.get('reviewVersion'), 'docs': DB['docs'], 'docVersions': DB['docVersions']}
+    return {'version': DB['version'], 'reviewVersion': REVIEW.get('reviewVersion'), 'appVersion': app_version(), 'docs': DB['docs'], 'docVersions': DB['docVersions']}
 
 # ---- PR data -----------------------------------------------------------------------------------------------------
 def build():
@@ -154,6 +157,18 @@ def build():
                         'pr': {'title': pr['title'], 'author': pr['user']['login'], 'head': head},
                         'mine': pr['user']['login'] == LOGIN, 'commits': json.load(open(diff)), 'gh': json.load(open(ghp))})
     log('built', head[:10], 'base', base[:10])
+
+def watch_app():
+    # A fix to the page code (feedback) reaches open tabs at once: wake the long poll, which reloads the page.
+    seen = app_version()
+    while True:
+        time.sleep(2)
+        try:
+            cur = app_version()
+            if cur != seen:
+                seen = cur; log('page code changed; reloading open tabs')
+                with lock: DB['version'] += 1; lock.notify_all()
+        except Exception as e: log('app watch failed:', e)
 
 def watch_head():
     while True:
@@ -368,14 +383,14 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def send(self, code, body, ctype='application/json'):
         b = body if isinstance(body, bytes) else json.dumps(body).encode()
-        self.send_response(code); self.send_header('content-type', ctype); self.send_header('cache-control', 'no-store')
+        self.send_response(code); self.send_header('content-type', ctype); self.send_header('cache-control', 'no-cache'); self.send_header('cache-control', 'no-store')
         self.send_header('content-length', str(len(b))); self.end_headers(); self.wfile.write(b)
     def local_host(self): return (self.headers.get('host') or '').split(':')[0] in ('127.0.0.1', 'localhost')
     def do_GET(self):
         if not self.local_host(): return self.send(403, {'error': 'bad host'})
         u = urlparse(self.path); q = parse_qs(u.query)
         if u.path == '/api/ping': return self.send(200, {'pr': f'{SLUG}#{N}', 'pid': os.getpid()})
-        if u.path == '/api/review': return self.send(200, dict(REVIEW['data'], reviewVersion=REVIEW['reviewVersion'], appVersion=str(os.path.getmtime(os.path.join(APP, 'app.js')))))
+        if u.path == '/api/review': return self.send(200, dict(REVIEW['data'], reviewVersion=REVIEW['reviewVersion'], appVersion=app_version()))
         if u.path == '/api/db':
             since = int((q.get('since') or ['-1'])[0])
             with lock:
@@ -411,7 +426,7 @@ def bind():
 if __name__ == '__main__':
     build()
     srv, port = bind()
-    for t in (watch_head, worker): threading.Thread(target=t, daemon=True).start()
+    for t in (watch_head, watch_app, worker): threading.Thread(target=t, daemon=True).start()
     signal.signal(signal.SIGTERM, stop)
     url = f'http://127.0.0.1:{port}/'
     info = {'url': url, 'port': port, 'pid': os.getpid(), 'state': STATE, 'inbox': INBOX, 'login': LOGIN, 'fork': FORK, 'mine': REVIEW['data']['mine']}
