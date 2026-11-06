@@ -1291,11 +1291,12 @@
   // v marks the file holding the cursor as viewed, or unmarks it; a viewed file collapses, so the cursor moves to its
   // header, and an unmarked one expands again.
   // On the commit stepper, v marks every file of the selected commit as viewed, or unmarks them all when all are viewed.
-  // A stepper button with focus (clicked or reached with Tab) counts as the commit stepper too, for that button's commit.
+  // A stepper button with focus (clicked or reached with Tab) counts as the commit stepper too, for that button's commit,
+  // and so does having no cursor at all, as right after [ or ] switch commits.
   const focusedStep = () => { const a = document.activeElement; return a && a.matches && a.matches('#stepper .step') ? Array.from(document.querySelectorAll('#stepper .step')).indexOf(a) : -1; };
   function toggleViewed() {
     const fs = focusedStep();
-    if (region === 'commits' || fs >= 0) {
+    if (region === 'commits' || fs >= 0 || (region === 'diff' && !current_())) {
       const c = COMMITS[fs >= 0 ? fs : current]; if (!c || !c.files || !c.files.length) { toast('This commit has no files'); return; }
       const on = !isCommitViewed(c);
       c.files.forEach(f => lsSet('viewed:' + c.sha + ':' + f.path, on ? '1' : '0'));
@@ -1420,8 +1421,9 @@
       n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), v: () => toggleViewed(), t: () => showKeys(document.getElementById('keys-panel').hidden), f: () => toggleFeedback(), d: () => ghResolveKey() || cardAction(['[data-act="dismiss"], .chat [data-act="restore"]', '[data-act="reject"], .card > .actions [data-act="restore"]', '[data-act="hidedisc"], [data-act="showdisc"]', '.change [data-act="decline"], .change [data-act="restorechg"]', '.ghthread > .actions [data-act="ghresolve"], .ghthread > .actions [data-act="ghunresolve"]'], 'Nothing to dismiss here'), q: () => cardAction(['[data-act="approve"]', '.change [data-act="accept"]'], 'No proposed comment or change here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), c: () => toggleTop(), Enter: () => enterCursor()
     };
     const act = keys[e.key] || (e.key.length === 1 ? keys[e.key.toLowerCase()] : null);
-    // Letter keys bring the cursor back to the diff, except v on the commit stepper, which marks that commit viewed.
-    if (act) { e.preventDefault(); if (e.key.length === 1 && !((region === 'commits' || focusedStep() >= 0) && e.key.toLowerCase() === 'v')) toDiff(); act(); }
+    // Letter keys bring the cursor back to the diff, except v on the commit stepper, which marks that commit viewed,
+    // and [ or ] there, which switch commits and stay on the stepper.
+    if (act) { e.preventDefault(); if (e.key.length === 1 && !((region === 'commits' || focusedStep() >= 0) && (e.key.toLowerCase() === 'v' || e.key === '[' || e.key === ']'))) toDiff(); act(); }
   });
 
   // The mouse pointer hides after two idle seconds or on a key press, and comes back when the mouse moves.
