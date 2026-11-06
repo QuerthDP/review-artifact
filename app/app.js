@@ -1115,7 +1115,8 @@
   const isSplitRow = el => viewMode === 'split' && el && el.matches && el.matches('#files tr.line, #files tr.ovnew');
   const rowHas = (tr, side) => !!tr.querySelector(side === 'LEFT' ? 'td.code.l:not(.empty)' : 'td.code.r:not(.empty)');
   const effSide = tr => !isSplitRow(tr) ? null : rowHas(tr, cursorSide) ? cursorSide : (cursorSide === 'LEFT' ? 'RIGHT' : 'LEFT');
-  const stops = () => Array.from(document.querySelectorAll('#commit .gstop, #files .file-head, #files tr.line, #files tr.ovnew.done, #files tr.hunk')).filter(el => !el.closest('[hidden]') && (el.classList.contains('file-head') || !el.closest('.collapsed')));
+  // With gh set (j / l) the stops also include each GitHub reviewer thread, so the keyboard can enter it without the arrows.
+  const stops = gh => Array.from(document.querySelectorAll('#commit .gstop, #files .file-head, #files tr.line, #files tr.ovnew.done, #files tr.hunk' + (gh ? ', #files .thread > .ghthread' : ''))).filter(el => !el.closest('[hidden]') && (el.classList.contains('file-head') || !el.closest('.collapsed')));
   function applyCursor() {
     document.querySelectorAll('.kcur').forEach(x => x.classList.remove('kcur')); document.querySelectorAll('td.kcell').forEach(x => x.classList.remove('kcell', 'kfirst'));
     const el = cursorId && document.getElementById(cursorId); if (!el) return; el.classList.add('kcur');
@@ -1148,9 +1149,9 @@
   }
   function current_() { const el = cursorId && document.getElementById(cursorId); return el && el.classList.contains('kcur') ? el : null; }
   function nearestStop(list, y) { let best = list[0], bd = Infinity; list.forEach(el => { const d = Math.abs(el.getBoundingClientRect().top - y); if (d < bd) { bd = d; best = el; } }); return best; }
-  function moveCursor(dir) {
-    const list = stops(); if (!list.length) return; lastCmt = null;
-    const cur = lineOf(current_()); const i = cur ? list.indexOf(cur) : -1;
+  function moveCursor(dir, gh) {
+    const list = stops(gh); if (!list.length) return; lastCmt = null;
+    const sel = current_(); const cur = sel && list.includes(sel) ? sel : lineOf(sel); const i = cur ? list.indexOf(cur) : -1;
     setCursor(i < 0 ? nearestStop(list, coverTop() + 12) : list[Math.max(0, Math.min(list.length - 1, i + dir))]);
   }
   // A selected comment card stands for the diff line it hangs under (j / l, k, i, m); file-level cards for the file header.
@@ -1389,7 +1390,7 @@
     if (selFrom && ['j', 'l', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', '[', ']'].includes(e.key)) clearSel();
     const keys = {
       ']': () => go(current + 1), '[': () => go(current - 1), ArrowRight: () => sideKey('RIGHT') || toQueue(), ArrowLeft: () => sideKey('LEFT') || toDiff(),
-      j: () => moveCursor(-1), ArrowUp: () => region === 'queue' ? moveQ(-1) : arrowMove(-1), l: () => moveCursor(1), ArrowDown: () => region === 'queue' ? moveQ(1) : arrowMove(1),
+      j: () => moveCursor(-1, true), ArrowUp: () => region === 'queue' ? moveQ(-1) : arrowMove(-1), l: () => moveCursor(1, true), ArrowDown: () => region === 'queue' ? moveQ(1) : arrowMove(1),
       PageUp: () => pageCursor(-1), PageDown: () => pageCursor(1),
       n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), v: () => toggleViewed(), t: () => showKeys(document.getElementById('keys-panel').hidden), f: () => toggleFeedback(), d: () => cardAction(['[data-act="dismiss"], .chat [data-act="restore"]', '[data-act="reject"], .card > .actions [data-act="restore"]', '[data-act="hidedisc"], [data-act="showdisc"]', '.change [data-act="decline"], .change [data-act="restorechg"]'], 'Nothing to dismiss here'), q: () => cardAction(['[data-act="approve"]', '.change [data-act="accept"]'], 'No proposed comment or change here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), c: () => toggleTop(), Enter: () => enterCursor()
     };
