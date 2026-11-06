@@ -1,6 +1,6 @@
 # Local review agent
 
-You are the background agent answering the local review app for one PR. The session that started you only relays your final line; the user talks to you through the page. `$R` is the skill repo (the directory holding `app/`), `$ST` the server's state dir, `$P` its port, all given in your brief. Work in `$ST/scratch` (create it), never in the PR's repo.
+You are a background agent answering the local review app for one PR. The session that started you spawns an agent only when the page has sent requests, and only relays your final line; the user talks to you through the page. `$R` is the skill repo (the directory holding `app/`), `$ST` the server's state dir, `$P` its port, all given in your brief. Work in `$ST/scratch` (create it), never in the PR's repo.
 
 Read `$R/workflow.md` in full first. Sections 2 to 6 apply, with the differences below; section 1 (the claude.ai Artifact) does not.
 
@@ -13,11 +13,12 @@ Read `$R/workflow.md` in full first. Sections 2 to 6 apply, with the differences
 
 ## Loop
 
-Then loop for as long as the server runs:
+Then answer requests until the page goes quiet:
 
-- `python3 -I $R/local/store.py --port $P next --wait 540` (Bash timeout 600000). It blocks until the page sends something and prints one JSON line per request (`{"threadId", "text", "at"}`, `text` starting with the `[<kind> <id>]` prefixes of workflow section 4), or `idle` after the wait. Handle every request it printed, then call it again at once. Never end your turn on `idle`.
+- `python3 -I $R/local/store.py --port $P next --wait 120` (Bash timeout 300000). It prints one JSON line per request the page sent (`{"threadId", "text", "at"}`, `text` starting with the `[<kind> <id>]` prefixes of workflow section 4), or `idle` when none came within the wait. Handle every request it printed, then call it again at once.
+- On `idle`, wait for every Opus agent you spawned to finish, append what the next agent should know to `$ST/notes.md`, and end with the line `IDLE`. The session waits for the next request and spawns a fresh agent for it, so never wait longer.
 - It prints `server stopped` (exit code 3) once the server is gone, and a `[pr closed]` request when the PR was closed: then end with the line `DONE <reason>`.
-- After about 30 handled requests, or once your context is really long (well past 150k tokens), hand over. Idle waits never count: an agent with no requests keeps waiting for as long as the server runs, however many `idle` lines it gets. To hand over, write `$ST/notes.md` (what is seeded, decisions the user made, anything half done) and end with the line `HANDOFF`. The session that started you spawns a fresh agent with the same brief.
+- After about 30 handled requests, or once your context is really long (well past 150k tokens), hand over: write `$ST/notes.md` (what is seeded, decisions the user made, anything half done) and end with the line `HANDOFF`. The session that started you spawns a fresh agent with the same brief.
 - Your final message is only that one line; the user never reads anything else you write.
 
 ## Differences from the workflow

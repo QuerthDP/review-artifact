@@ -7,6 +7,8 @@
   store.py [--port 8765] batch <json | @file>                         [{op, collection, doc_id, data}], as seeds.py writes them
   store.py [--port 8765] next [--wait 540]                            the page's next requests to Claude, one JSON line each;
                                                                       "idle" after the wait, "server stopped" (exit 3) once it is gone
+  store.py [--port 8765] wait                                          blocks, taking nothing, until the page has sent requests:
+                                                                      "pending <n>", or "server stopped" (exit 3)
 
 The page shows every write at once."""
 import json, os, sys, urllib.error, urllib.request
@@ -40,6 +42,14 @@ elif cmd == 'next':
         else: print('server stopped'); sys.exit(3)
     for it in items: print(json.dumps(it))
     if not items: print('idle')
+elif cmd == 'wait':
+    while True:
+        try: n = call('pending', {'wait': 540}, timeout=600)['pending']
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+            if isinstance(e, urllib.error.HTTPError): raise
+            if isinstance(e, TimeoutError) or isinstance(getattr(e, 'reason', None), TimeoutError): continue
+            print('server stopped'); sys.exit(3)
+        if n: print('pending', n); break
 elif cmd == 'batch':
     r = call('db', {'op': 'batch', 'writes': arg(a[1])}); print(sum(r['ok']), 'of', len(r['ok']), 'writes applied')
 else: sys.exit(__doc__)

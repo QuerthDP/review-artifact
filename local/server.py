@@ -214,6 +214,15 @@ def read_cursor():
     try: return int(open(CURSOR).read().strip() or 0)
     except (FileNotFoundError, ValueError): return 0
 
+def peek_inbox(wait):
+    """Blocks up to `wait` seconds until requests nobody has taken are waiting; returns how many, taking none."""
+    end = time.time() + max(0, min(wait, 570))
+    with lock:
+        while True:
+            n, left = len(inbox_lines()) - read_cursor(), end - time.time()
+            if n > 0 or left <= 0: return {'pending': max(n, 0)}
+            lock.wait(min(left, 30))
+
 def take_inbox(wait):
     """Blocks up to `wait` seconds for requests the agent has not taken yet; returns them and marks them taken."""
     end = time.time() + max(0, min(wait, 570))
@@ -408,6 +417,8 @@ class H(BaseHTTPRequestHandler):
                 writes = body['writes'] if body.get('op') == 'batch' else [body]
                 ok = commit_writes(writes)
                 with lock: return self.send(200, dict(snapshot(), ok=ok))
+            if self.path == '/api/pending':
+                return self.send(200, peek_inbox(float(body.get('wait') or 0)))
             if self.path == '/api/inbox':
                 return self.send(200, take_inbox(float(body.get('wait') or 0)))
             if self.path == '/api/claude':
