@@ -592,25 +592,6 @@
     });
     threadsAt(c.sha, null, null).forEach(t => g.appendChild(threadCard(t, h2)));
     ghAt(c.sha, null, null).forEach(t => g.appendChild(ghThreadCard(t)));
-    if (GH.conversation.length) {
-      const pc = document.createElement('details'); pc.className = 'ghthread';
-      pc.open = ghOpen.has('pr-conv') || !!(openComposer && openComposer.replyToConv);
-      pc.addEventListener('toggle', () => { if (pc.open) ghOpen.add('pr-conv'); else ghOpen.delete('pr-conv'); });
-      pc.innerHTML = '<summary class="card-head"><b>PR conversation</b><span>' + GH.conversation.length + ' items · replies are queued and posted together when you click "Post queued conversation replies"</span></summary>';
-      GH.conversation.forEach(c => {
-        const item = document.createElement('div'); item.className = 'ghc';
-        item.innerHTML = '<div class="ghwho"><b>' + esc(c.author) + '</b> <span>' + esc(c.kind) + ' · ' + esc((c.at || '').slice(0, 10)) + '</span> <a href="' + esc(c.url) + '" target="_blank" rel="noopener">open</a></div><div class="ghbody">' + cleanHTML(c.html) + '</div>';
-        Object.values(comments).filter(x => x.replyToConv === c.url).forEach(x => item.appendChild(card(x)));
-        if (openComposer && openComposer.replyToConv === c.url) item.appendChild(composer(openComposer));
-        else {
-          const b = document.createElement('button'); b.className = 'btn small'; b.textContent = 'Reply (queue)';
-          b.onclick = () => { openComposer = { commit: COMMITS[current].sha, commitIdx: current, replyToConv: c.url, convAuthor: c.author }; editing = null; renderAll(); };
-          const row = document.createElement('div'); row.className = 'actions'; row.appendChild(b); item.appendChild(row);
-        }
-        pc.appendChild(item);
-      });
-      g.appendChild(pc);
-    }
     if (openAsk && !openAsk.about && openAsk.commitIdx === current && !openAsk.path && openAsk.kind !== 'feedback') g.appendChild(askComposer(openAsk, h2));
     if (orphan.length) { const h = document.createElement('div'); h.className = 'empty'; h.textContent = 'Anchored to files not in this commit:'; g.appendChild(h); orphan.forEach(x => g.appendChild(card(x))); }
     if (openComposer && openComposer.commitIdx === current && !openComposer.path && !openComposer.replyTo && !openComposer.replyToConv) g.appendChild(composer(openComposer));
@@ -620,6 +601,40 @@
       const a = document.createElement('button'); a.className = 'btn small ask'; a.textContent = '? Ask Claude about this commit'; a.dataset.i = '1'; a.onclick = () => askAbout({ commit: c.sha, commitIdx: current }); row.appendChild(a);
       const m = document.createElement('button'); m.className = 'btn small'; m.style.color = 'var(--proposed)'; m.style.borderColor = 'var(--proposed)'; m.textContent = '✎ Ask Claude to change this commit'; m.title = 'Reword its message, drop it, or rework it as a whole (m)'; m.dataset.m = '1'; m.onclick = () => askAbout({ commit: c.sha, commitIdx: current, kind: 'modify' }); row.appendChild(m);
       g.appendChild(row);
+    }
+    // Before the first commit: the PR description with the whole PR conversation under it, as on the PR's own page.
+    if (current === 0) {
+      const desc = GH.description, conv = GH.conversation || [];
+      const ov = document.createElement('div'); ov.className = 'general prov'; ov.id = 'prov';
+      ov.innerHTML = '<h3>Pull request description and conversation</h3>';
+      if (desc) {
+        const dd = document.createElement('div'); dd.className = 'ghthread prdesc'; dd.id = 'prdesc';
+        dd.innerHTML = '<div class="card-head"><b>' + esc(desc.author) + '</b><span>description · ' + esc((desc.at || '').slice(0, 10)) + '</span><a href="' + esc(desc.url) + '" target="_blank" rel="noopener">open</a></div><div class="ghbody">' + (desc.html ? cleanHTML(desc.html) : '<span class="empty">No description provided.</span>') + '</div>';
+        ov.appendChild(dd);
+      }
+      if (conv.length) {
+        const pc = document.createElement('details'); pc.className = 'ghthread'; pc.id = 'prconv';
+        pc.open = !ghClosed.has('pr-conv') || !!(openComposer && openComposer.replyToConv);
+        pc.addEventListener('toggle', () => { if (pc.open) ghClosed.delete('pr-conv'); else ghClosed.add('pr-conv'); });
+        pc.innerHTML = '<summary class="card-head"><b>PR conversation</b><span>' + conv.length + ' items · replies are queued and posted together when you click "Post queued conversation replies"</span></summary>';
+        conv.forEach(c => {
+          const item = document.createElement('div'); item.className = 'ghc';
+          item.innerHTML = '<div class="ghwho"><b>' + esc(c.author) + '</b> <span>' + esc(c.kind) + ' · ' + esc((c.at || '').slice(0, 10)) + '</span> <a href="' + esc(c.url) + '" target="_blank" rel="noopener">open</a></div><div class="ghbody">' + cleanHTML(c.html) + '</div>';
+          Object.values(comments).filter(x => x.replyToConv === c.url).forEach(x => item.appendChild(card(x)));
+          if (openComposer && openComposer.replyToConv === c.url) item.appendChild(composer(openComposer));
+          else {
+            const b = document.createElement('button'); b.className = 'btn small'; b.textContent = 'Reply (queue)';
+            b.onclick = () => { openComposer = { commit: COMMITS[0].sha, commitIdx: 0, replyToConv: c.url, convAuthor: c.author }; editing = null; renderAll(); };
+            const row = document.createElement('div'); row.className = 'actions'; row.appendChild(b); item.appendChild(row);
+          }
+          pc.appendChild(item);
+        });
+        ov.appendChild(pc);
+      }
+      if (ov.children.length > 1) {
+        Array.from(ov.children).filter(ch => ch.tagName !== 'H3').forEach((ch, i) => { ch.classList.add('gstop'); if (!ch.id) ch.id = 'prstop-' + i; });
+        el.insertBefore(ov, h2);
+      }
     }
     // Every item of the commit-level section is a keyboard stop, before the files.
     Array.from(g.children).filter(ch => ch.tagName !== 'H3').forEach((ch, i) => { ch.classList.add('gstop'); if (!ch.id) ch.id = 'gstop-' + current + '-' + i; });
@@ -887,10 +902,10 @@
       const items = all.filter(x => x.status === st); if (!items.length) return;
       const g = document.createElement('div'); g.className = 'qgroup'; g.innerHTML = '<h3><span class="pill ' + st + '">' + items.length + '</span>' + label + '</h3>';
       items.forEach(x => {
-        const ci = COMMITS.findIndex(c => c.sha === x.commit);
+        const ci = x.replyToConv ? 0 : COMMITS.findIndex(c => c.sha === x.commit);
         const b = document.createElement('button'); b.className = 'qitem';
-        b.innerHTML = '<div class="where">' + (ci + 1) + ' · ' + esc(x.path ? x.path + (x.line ? ':' + x.line : '') : 'commit-level') + ' · ' + (x.author === 'claude' ? 'Claude' : 'you') + '</div><div class="snip">' + esc(x.body.split('\n')[0]) + '</div>';
-        b.onclick = () => { go(ci); setTimeout(() => { const t = x.path && x.line ? document.querySelector('[data-ids~="' + rowId(ci, x.path, x.line, x.side || 'RIGHT') + '"]') : document.getElementById('commit'); if (t) { const sec = t.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; } t.scrollIntoView({ block: 'center' }); flashRow(t); } }, 0); };
+        b.innerHTML = '<div class="where">' + (ci + 1) + ' · ' + esc(x.replyToConv ? 'PR conversation' : x.path ? x.path + (x.line ? ':' + x.line : '') : 'commit-level') + ' · ' + (x.author === 'claude' ? 'Claude' : 'you') + '</div><div class="snip">' + esc(x.body.split('\n')[0]) + '</div>';
+        b.onclick = () => { go(ci); setTimeout(() => { const t = x.path && x.line ? document.querySelector('[data-ids~="' + rowId(ci, x.path, x.line, x.side || 'RIGHT') + '"]') : document.getElementById(x.replyToConv && document.getElementById('prconv') ? 'prconv' : 'commit'); if (t) { const sec = t.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; } t.scrollIntoView({ block: 'center' }); flashRow(t); } }, 0); };
         g.appendChild(b);
       });
       el.appendChild(g);

@@ -1,4 +1,4 @@
-"""Other reviewers' threads + PR conversation for the page: ghthreads.py <repo_dir> <owner/repo> <N> <diff.json> <out.json>
+"""Other reviewers' threads, the PR description and the PR conversation for the page: ghthreads.py <repo_dir> <owner/repo> <N> <diff.json> <out.json>
 REST only (GraphQL is blocked in some sessions). Each review thread is anchored to the PR commit that last changed its
 line (git blame at the PR head, or at the comment's original commit when outdated; when that commit's line comes from
 a commit no longer in the PR, e.g. after a force-push, the line is followed through the diff to the head and blamed
@@ -68,6 +68,8 @@ conv = [{'author': (r['user'] or {}).get('login', 'ghost'), 'html': r.get('body_
         for r in api(f'pulls/{num}/reviews?per_page=100') if (r.get('body') or '').strip() and r['state'] != 'PENDING' and (r['user'] or {}).get('login') != me]
 conv += [{'author': (c['user'] or {}).get('login', 'ghost'), 'html': c.get('body_html') or '', 'at': c['created_at'], 'url': c['html_url'], 'kind': 'comment'} for c in api(f'issues/{num}/comments?per_page=100')]
 conv.sort(key=lambda x: x['at'] or '')
-json.dump({'threads': threads, 'conversation': conv}, open(out, 'w'))
+pr = json.loads(subprocess.run(['gh', 'api', '-H', 'Accept: application/vnd.github.full+json', f'repos/{slug}/pulls/{num}'], capture_output=True, text=True, check=True).stdout)
+desc = {'author': (pr['user'] or {}).get('login', 'ghost'), 'html': pr.get('body_html') or '', 'at': pr.get('created_at'), 'url': pr['html_url'], 'title': pr.get('title') or ''}
+json.dump({'threads': threads, 'conversation': conv, 'description': desc}, open(out, 'w'))
 for t in threads: print(t['rootCommentId'], t['commit'][:7], t['path'], t['line'], {True: 'resolved', False: 'open', None: '?'}[t['resolved']], len(t['comments']), 'comments')
 print(len(conv), 'conversation items')
