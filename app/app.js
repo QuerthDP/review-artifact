@@ -310,6 +310,9 @@
   }
 
   // ---------- render ----------
+  // A commit counts as viewed once every one of its files is marked viewed (the same localStorage keys as the checkboxes).
+  function isFileViewed(c, path) { return lsGet('viewed:' + c.sha + ':' + path) === '1'; }
+  function isCommitViewed(c) { return !!(c.files && c.files.length) && c.files.every(f => isFileViewed(c, f.path)); }
   function renderStepper() {
     const el = document.getElementById('stepper'); el.innerHTML = '';
     COMMITS.forEach((c, i) => {
@@ -326,8 +329,9 @@
       const kinds = [[p, 'proposed', 'proposed comment', 'proposed comments'], [q, 'queued', 'queued comment', 'queued comments'], [decide, 'chg', 'change to decide', 'changes to decide'], [wait, 'wait', 'question waiting for Claude', 'questions waiting for Claude'], [conv, 'conv', 'conversation with Claude', 'conversations with Claude'], [gho, 'gh', 'open reviewer thread', 'open reviewer threads']];
       const dots = kinds.map(k => ('<span class="dot ' + k[1] + '"></span>').repeat(Math.min(k[0], 8))).join('');
       const tip = kinds.filter(k => k[0]).map(k => k[0] + ' ' + (k[0] > 1 ? k[3] : k[2]));
-      const b = document.createElement('button'); b.className = 'step' + (i === current ? ' active' : ''); b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', i === current);
-      b.innerHTML = '<span class="n">' + (i + 1) + '/' + COMMITS.length + ' · ' + esc(c.short) + (isDropped(c.sha) ? ' · <span class="dropmark">dropped</span>' : '') + '</span><span class="s">' + esc((Object.values(changes).find(x => x.commit === c.sha && x.op === 'reword' && x.status === 'accepted' && x.message) || {}).message ? String(Object.values(changes).find(x => x.commit === c.sha && x.op === 'reword' && x.status === 'accepted' && x.message).message).split('\n')[0] : c.subject) + '</span><span class="dots">' + dots + '</span>';
+      const viewed = isCommitViewed(c); if (viewed) tip.unshift('all files viewed');
+      const b = document.createElement('button'); b.className = 'step' + (i === current ? ' active' : '') + (viewed ? ' viewed' : ''); b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', i === current);
+      b.innerHTML = '<span class="n">' + (i + 1) + '/' + COMMITS.length + ' · ' + esc(c.short) + (isDropped(c.sha) ? ' · <span class="dropmark">dropped</span>' : '') + (viewed ? ' · <span class="viewmark">✓ viewed</span>' : '') + '</span><span class="s">' + esc((Object.values(changes).find(x => x.commit === c.sha && x.op === 'reword' && x.status === 'accepted' && x.message) || {}).message ? String(Object.values(changes).find(x => x.commit === c.sha && x.op === 'reword' && x.status === 'accepted' && x.message).message).split('\n')[0] : c.subject) + '</span><span class="dots">' + dots + '</span>';
       if (tip.length) b.title = tip.join(' · ');
       b.onclick = () => go(i); el.appendChild(b);
     });
@@ -600,7 +604,7 @@
       const head = document.createElement('div'); head.className = 'file-head'; head.id = fid + '-head';
       head.innerHTML = '<button class="btn small" data-toggle aria-label="Toggle diff">' + (sec.classList.contains('collapsed') ? '▸' : '▾') + '</button><span class="path">' + esc(f.path) + '</span><span class="tag">' + ({ A: 'added', D: 'deleted', M: 'modified' })[f.status] + '</span><span class="stat"><span class="a">+' + f.add + '</span> <span class="d">−' + f.del + '</span></span><label><input type="checkbox" id="v-' + fid + '"' + (viewed ? ' checked' : '') + '> Viewed</label>';
       head.querySelector('[data-toggle]').onclick = () => { sec.classList.toggle('collapsed'); head.querySelector('[data-toggle]').textContent = sec.classList.contains('collapsed') ? '▸' : '▾'; };
-      head.querySelector('input').onchange = e => { lsSet(viewedKey, e.target.checked ? '1' : '0'); sec.classList.toggle('collapsed', e.target.checked); head.querySelector('[data-toggle]').textContent = e.target.checked ? '▸' : '▾'; const p = document.querySelector('.progress b'); if (p) p.textContent = c.files.filter(x => lsGet('viewed:' + c.sha + ':' + x.path) === '1').length; };
+      head.querySelector('input').onchange = e => { lsSet(viewedKey, e.target.checked ? '1' : '0'); sec.classList.toggle('collapsed', e.target.checked); head.querySelector('[data-toggle]').textContent = e.target.checked ? '▸' : '▾'; const p = document.querySelector('.progress b'); if (p) p.textContent = c.files.filter(x => lsGet('viewed:' + c.sha + ':' + x.path) === '1').length; renderStepper(); markStep(); };
       sec.appendChild(head);
       const fileLevel = byCommit(c.sha).filter(x => x.path === f.path && !x.line && !isReply(x));
       const ghFile = ghAt(c.sha, f.path, null);
@@ -1275,7 +1279,14 @@
   }
   // v marks the file holding the cursor as viewed, or unmarks it; a viewed file collapses, so the cursor moves to its
   // header, and an unmarked one expands again.
+  // On the commit stepper, v marks every file of the selected commit as viewed, or unmarks them all when all are viewed.
   function toggleViewed() {
+    if (region === 'commits') {
+      const c = COMMITS[current]; if (!c || !c.files || !c.files.length) { toast('This commit has no files'); return; }
+      const on = !isCommitViewed(c);
+      c.files.forEach(f => lsSet('viewed:' + c.sha + ':' + f.path, on ? '1' : '0'));
+      renderAll(); toast(on ? 'Commit marked as viewed' : 'Commit marked as not viewed'); return;
+    }
     const cur = current_(), sec = cur && cur.closest('.file'); if (!sec) { toast('Select a line in a file first (j / l)'); return; }
     const cb = sec.querySelector('.file-head input[type=checkbox]'); if (!cb) return;
     cb.checked = !cb.checked; cb.dispatchEvent(new Event('change'));
