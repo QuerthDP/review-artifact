@@ -1046,8 +1046,10 @@
   }
   // ← / → on a split line move the cursor to that side; with nowhere to go, the keys keep moving between the diff and the queue.
   function sideKey(side) {
-    const cur = region === 'diff' && current_(); if (!isSplitRow(cur) || effSide(cur) === side || !rowHas(cur, side)) return false;
-    cursorSide = side; applyCursor(); markSel(); return true;
+    const cur = region === 'diff' && current_(); if (!isSplitRow(cur)) return false;
+    if (selFrom && selSide && selSide !== side) { cursorSide = side; selSide = side; applyCursor(); markSel(); return true; }
+    if (effSide(cur) === side || !rowHas(cur, side)) return false;
+    cursorSide = side; if (selFrom) selSide = side; applyCursor(); markSel(); return true;
   }
   function setCursor(el, scroll) {
     if (!el || !el.id) return; cursorId = el.id; applyCursor(); savePos(); if (scroll === false) return;
@@ -1108,6 +1110,8 @@
   // Shift + j / l (or Shift + Up / Down, or Shift + click on a line's button) picks a range of lines in one file and side;
   // k, i and m then open one multi-line comment or request whose start line is the top of the range.
   let selFrom = null;
+  // A range keeps the side it was started on (split view), even across rows that have nothing on that side.
+  let selSide = null;
   function lineLabel(a) { return a.line ? ':' + (a.startLine ? a.startLine + '-' : '') + a.line : ''; }
   function selRows() {
     const a = selFrom && document.getElementById(selFrom), b = lineOf(current_());
@@ -1128,12 +1132,12 @@
     // In the split view the range is framed on its side: the cursor's side while picking, the anchor's side once a composer is open.
     if (viewMode !== 'split') return;
     const open = !picked && [openComposer, openAsk].find(x => x && x.startLine && x.path && x.commitIdx === current);
-    const side = open ? (open.side || 'RIGHT') : (effSide(lineOf(current_())) || cursorSide), k = side === 'LEFT' ? 0 : 2;
+    const side = open ? (open.side || 'RIGHT') : (selSide || effSide(lineOf(current_())) || cursorSide), k = side === 'LEFT' ? 0 : 2;
     r.forEach(x => { const tds = x.children; if (tds.length < 4) return; tds[k].classList.add('scell', 'sfirst'); tds[k + 1].classList.add('scell'); });
   }
-  function clearSel() { selFrom = null; markSel(); }
+  function clearSel() { selFrom = null; selSide = null; markSel(); }
   function extendSel(dir) {
-    const cur = lineOf(current_()); if (!selFrom && cur && cur.matches('tr.line')) selFrom = cur.id;
+    const cur = lineOf(current_()); if (!selFrom && cur && cur.matches('tr.line')) { selFrom = cur.id; selSide = effSide(cur); }
     moveCursor(dir); markSel();
   }
   const sideLines = (tr, side) => Array.from(tr.querySelectorAll('.addbtn')).filter(x => x.dataset.side === side).map(x => parseInt(x.dataset.line, 10));
@@ -1172,7 +1176,8 @@
       askAbout({ commit: x.commit, commitIdx: current, path: x.path, line: x.line, startLine: x.startLine || null, side: 'RIGHT', kind: sel === '.modbtn' ? 'modify' : undefined, onChange: x.id, newLine: cur.dataset.nl }); return;
     }
     if (!cur || !cur.matches('tr.line')) { toast('Select a line first (j / l)'); return; }
-    const rows = selRows(), row = rows ? rows[rows.length - 1] : cur;
+    const rows = selRows(), rangeSide = rows && viewMode === 'split' ? (selSide || effSide(cur) || 'RIGHT') : null;
+    const row = rows ? (rangeSide ? rows.filter(x => rowHas(x, rangeSide)).pop() || rows[rows.length - 1] : rows[rows.length - 1]) : cur;
     // i continues the conversation already open on this line (the selected one, else the latest) instead of starting another.
     if (sel === '.askbtn' && !rows) {
       const here = current_(), cmt = skipOv(row.nextElementSibling, 1);
@@ -1180,7 +1185,7 @@
       const ta = chat && chat.querySelector('.followup textarea'); if (ta) { ta.scrollIntoView({ block: 'center' }); ta.focus(); return; }
     }
     // The buttons of the side the cursor is on (the new side outside the split view, where each row has one side).
-    const side = effSide(cur) || 'RIGHT', sideOf = x => { const a = x.closest('.lbtns').querySelector('.addbtn'); return a && a.dataset.side; };
+    const side = rangeSide || effSide(cur) || 'RIGHT', sideOf = x => { const a = x.closest('.lbtns').querySelector('.addbtn'); return a && a.dataset.side; };
     const btns = Array.from(row.querySelectorAll(sel)), b = isSplitRow(row) ? btns.find(x => sideOf(x) === side) : (btns.find(x => sideOf(x) === 'RIGHT') || btns[btns.length - 1]);
     if (b) b.click(); else if (sel === '.modbtn') toast(side === 'LEFT' && isSplitRow(row) ? 'Claude changes the new code: press → for the new side' : 'Claude changes the new code: pick a new or unchanged line'); else toast('Nothing on this side of the line');
   }
