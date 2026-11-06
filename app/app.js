@@ -26,11 +26,14 @@
   }
   const isReply = x => !!(x.replyTo || x.replyToConv);
   const ghOpen = new Set(), ghClosed = new Set(); // per-view expand state of reviewer threads, kept across re-renders
+  // A reviewer thread can be marked resolved on this page only (d or its button; localStorage): GitHub is not changed.
+  const ghLocalRes = t => lsGet('ghres:' + t.id) === '1';
+  const ghRes = t => !!t.resolved || ghLocalRes(t);
   function ghThreadCard(t) {
     const d = document.createElement('details'); d.className = 'ghthread'; d.id = 'ghs-' + t.id;
-    d.open = ghOpen.has(t.id) || (!t.resolved && !ghClosed.has(t.id)) || !!(openComposer && openComposer.replyTo === t.id);
+    d.open = ghOpen.has(t.id) || (!ghRes(t) && !ghClosed.has(t.id)) || !!(openComposer && openComposer.replyTo === t.id);
     d.addEventListener('toggle', () => { if (d.open) { ghOpen.add(t.id); ghClosed.delete(t.id); } else { ghOpen.delete(t.id); ghClosed.add(t.id); } });
-    const pills = (t.resolved ? '<span class="pill rejected">resolved</span>' : t.resolved === false ? '<span class="pill proposed">open</span>' : '') + (t.outdated ? '<span class="pill rejected">outdated</span>' : '');
+    const pills = (t.resolved ? '<span class="pill rejected">resolved</span>' : ghLocalRes(t) ? '<span class="pill rejected" title="Marked resolved on this page only; GitHub is not changed">resolved here</span>' : t.resolved === false ? '<span class="pill proposed">open</span>' : '') + (t.outdated ? '<span class="pill rejected">outdated</span>' : '');
     const first = t.comments[0];
     d.innerHTML = '<summary class="card-head"><b>' + esc(first.author) + '</b>' + pills + '<span>' + t.comments.length + ' comment' + (t.comments.length > 1 ? 's' : '') + ' · GitHub ' + esc(t.ghPath) + (t.ghLine ? ':' + t.ghLine : '') + '</span><a href="' + esc(first.url) + '" target="_blank" rel="noopener">open on GitHub</a></summary>' +
       t.comments.map(c => '<div class="ghc"><div class="ghwho"><b>' + esc(c.author) + '</b> <span>' + esc((c.at || '').slice(0, 10)) + '</span></div><div class="ghbody">' + cleanHTML(c.html) + '</div></div>').join('');
@@ -41,7 +44,14 @@
     else {
       const b = document.createElement('button'); b.className = 'btn small'; b.textContent = 'Reply (queue to your GitHub draft)';
       b.onclick = () => { openComposer = { commit: t.commit, commitIdx: current, path: t.path, line: t.line, side: t.side, replyTo: t.id }; editing = null; renderAll(); };
-      const row = document.createElement('div'); row.className = 'actions'; row.appendChild(b); d.appendChild(row);
+      const row = document.createElement('div'); row.className = 'actions'; row.appendChild(b);
+      if (!t.resolved) {
+        const on = ghLocalRes(t), r = document.createElement('button'); r.className = 'btn small'; r.dataset.act = on ? 'ghunresolve' : 'ghresolve';
+        r.textContent = on ? 'Mark open' : 'Mark resolved'; r.title = 'On this page only; GitHub is not changed';
+        r.onclick = () => { lsSet('ghres:' + t.id, on ? '0' : '1'); if (on) { ghClosed.delete(t.id); } else { ghOpen.delete(t.id); ghClosed.add(t.id); } renderAll(); toast(on ? 'Thread marked open' : 'Thread marked resolved on this page'); };
+        row.appendChild(r);
+      }
+      d.appendChild(row);
     }
     return d;
   }
@@ -325,7 +335,7 @@
       const decide = chs.filter(x => x.status === 'proposed' || x.status === 'failed').length;
       const ths = Object.values(threads).filter(t => t.commit === c.sha && t.kind !== 'feedback' && !t.dismissed);
       const wait = ths.filter(t => t.status !== 'answered').length, conv = ths.length - wait;
-      const gho = GH.threads.filter(t => t.commit === c.sha && !t.resolved).length;
+      const gho = GH.threads.filter(t => t.commit === c.sha && !ghRes(t)).length;
       const kinds = [[p, 'proposed', 'proposed comment', 'proposed comments'], [q, 'queued', 'queued comment', 'queued comments'], [decide, 'chg', 'change to decide', 'changes to decide'], [wait, 'wait', 'question waiting for Claude', 'questions waiting for Claude'], [conv, 'conv', 'conversation with Claude', 'conversations with Claude'], [gho, 'gh', 'open reviewer thread', 'open reviewer threads']];
       const dots = kinds.map(k => ('<span class="dot ' + k[1] + '"></span>').repeat(Math.min(k[0], 8))).join('');
       const tip = kinds.filter(k => k[0]).map(k => k[0] + ' ' + (k[0] > 1 ? k[3] : k[2]));
@@ -828,14 +838,14 @@
       });
       el.appendChild(g);
     }
-    const ghT = GH.threads.filter(t => COMMITS.some(c => c.sha === t.commit)).sort((a, b) => !!a.resolved - !!b.resolved || COMMITS.findIndex(c => c.sha === a.commit) - COMMITS.findIndex(c => c.sha === b.commit) || (a.path || '').localeCompare(b.path || '') || (a.line || 0) - (b.line || 0));
+    const ghT = GH.threads.filter(t => COMMITS.some(c => c.sha === t.commit)).sort((a, b) => ghRes(a) - ghRes(b) || COMMITS.findIndex(c => c.sha === a.commit) - COMMITS.findIndex(c => c.sha === b.commit) || (a.path || '').localeCompare(b.path || '') || (a.line || 0) - (b.line || 0));
     if (ghT.length) {
-      const g = document.createElement('div'); g.className = 'qgroup'; const nOpen = ghT.filter(t => !t.resolved).length;
+      const g = document.createElement('div'); g.className = 'qgroup'; const nOpen = ghT.filter(t => !ghRes(t)).length;
       g.innerHTML = '<h3><span class="pill rejected">' + ghT.length + '</span>Reviewer threads · ' + nOpen + ' open</h3>';
       ghT.forEach(t => {
         const ci = COMMITS.findIndex(c => c.sha === t.commit), f = t.comments[0] || {}, b = document.createElement('button'); b.className = 'qitem';
         const txt = String(f.body || f.text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() || (cleanTextOf(f.html));
-        b.innerHTML = '<div class="where">' + (ci + 1) + ' · ' + esc(f.author || '') + ' · ' + esc((t.path || 'commit-level') + lineLabel(t)) + ' <span class="pill ' + (t.resolved ? 'rejected">resolved' : 'proposed">open') + '</span></div><div class="snip">' + esc(txt.length > 80 ? txt.slice(0, 80) + '…' : txt) + '</div>';
+        b.innerHTML = '<div class="where">' + (ci + 1) + ' · ' + esc(f.author || '') + ' · ' + esc((t.path || 'commit-level') + lineLabel(t)) + ' <span class="pill ' + (t.resolved ? 'rejected">resolved' : ghLocalRes(t) ? 'rejected">resolved here' : 'proposed">open') + '</span></div><div class="snip">' + esc(txt.length > 80 ? txt.slice(0, 80) + '…' : txt) + '</div>';
         b.onclick = () => jumpTo(t.commit, 'ghs-' + t.id, (t.path ? [fileId(ci, t.path) + '-head'] : []).concat('commit'));
         g.appendChild(b);
       });
@@ -1340,6 +1350,16 @@
     rows[idx].scrollIntoView({ block: 'center' }); flashRow(ln || rows[idx]);
   }
   // d, q and r act on the cards of the selected line or comment: dismiss or restore a conversation or reject or restore a comment, queue, toggle Reviewed by Human.
+  // d on a selected reviewer thread marks it resolved on this page, or open again.
+  function ghResolveKey() {
+    let el = lastCmt && lastCmt.matches('.ghthread') ? lastCmt : current_();
+    if (!el || !el.matches('.ghthread')) return false;
+    // A re-render replaces the card; act on the one now on the page.
+    if (el.id) el = document.getElementById(el.id) || el;
+    const b = el.querySelector(':scope > .actions [data-act="ghresolve"], :scope > .actions [data-act="ghunresolve"]');
+    if (b) b.click(); else toast('Nothing to resolve here (already resolved on GitHub?)');
+    return true;
+  }
   function cardAction(sel, none) {
     const cur = current_(); let scope = [];
     if (lastCmt) scope = [lastCmt];
@@ -1397,7 +1417,7 @@
       ']': () => go(current + 1), '[': () => go(current - 1), ArrowRight: () => sideKey('RIGHT') || toQueue(), ArrowLeft: () => sideKey('LEFT') || toDiff(),
       j: () => moveCursor(-1, true), ArrowUp: () => region === 'queue' ? moveQ(-1) : arrowMove(-1), l: () => moveCursor(1, true), ArrowDown: () => region === 'queue' ? moveQ(1) : arrowMove(1),
       PageUp: () => pageCursor(-1), PageDown: () => pageCursor(1),
-      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), v: () => toggleViewed(), t: () => showKeys(document.getElementById('keys-panel').hidden), f: () => toggleFeedback(), d: () => cardAction(['[data-act="dismiss"], .chat [data-act="restore"]', '[data-act="reject"], .card > .actions [data-act="restore"]', '[data-act="hidedisc"], [data-act="showdisc"]', '.change [data-act="decline"], .change [data-act="restorechg"]'], 'Nothing to dismiss here'), q: () => cardAction(['[data-act="approve"]', '.change [data-act="accept"]'], 'No proposed comment or change here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), c: () => toggleTop(), Enter: () => enterCursor()
+      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), v: () => toggleViewed(), t: () => showKeys(document.getElementById('keys-panel').hidden), f: () => toggleFeedback(), d: () => ghResolveKey() || cardAction(['[data-act="dismiss"], .chat [data-act="restore"]', '[data-act="reject"], .card > .actions [data-act="restore"]', '[data-act="hidedisc"], [data-act="showdisc"]', '.change [data-act="decline"], .change [data-act="restorechg"]', '.ghthread > .actions [data-act="ghresolve"], .ghthread > .actions [data-act="ghunresolve"]'], 'Nothing to dismiss here'), q: () => cardAction(['[data-act="approve"]', '.change [data-act="accept"]'], 'No proposed comment or change here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), c: () => toggleTop(), Enter: () => enterCursor()
     };
     const act = keys[e.key] || (e.key.length === 1 ? keys[e.key.toLowerCase()] : null);
     // Letter keys bring the cursor back to the diff, except v on the commit stepper, which marks that commit viewed.
