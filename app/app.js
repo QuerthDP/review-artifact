@@ -633,12 +633,29 @@
       };
       // Conversations on the new lines of an accepted change hang under the exact line they were asked about.
       const ovShown = new Set();
+      // A change proposed on top of an accepted one (its old lines are that change's new lines, or it names the change
+      // with onChange and newEnd) hangs under the line it edits: the last line of its first edit, not the change's end.
+      const ovChgShown = new Set();
+      const ovAnchorOf = (ch, x) => {
+        if (ch.id === x.id || ch.path !== x.path || ['accepted', 'accepting', 'landed'].includes(ch.status)) return null;
+        if (ch.onChange === x.id && ch.newEnd != null) return ch.newEnd;
+        const o = ch.old || [], nw = x.new || [];
+        if (!o.length || o.length !== nw.length || o.some((l, k) => l !== nw[k])) return null;
+        const ops = lineDiff(o, ch.new || []); let oi = 0, last = null, started = false;
+        for (const op of ops) {
+          if (op[0] === 'c') { if (started) break; oi++; continue; }
+          started = true; if (op[0] === 'd') { last = oi; oi++; } else if (last == null) last = Math.max(0, oi - 1);
+        }
+        return last == null ? o.length - 1 : Math.min(last, o.length - 1);
+      };
       const ovThreadRow = (x, i, lineEl) => {
         const convs = Object.values(threads).filter(t => visibleThread(t) && !t.about && t.onChange === x.id && t.newEnd === i);
         const ask = openAsk && openAsk.onChange === x.id && openAsk.newEnd === i;
-        if (!convs.length && !ask) return null;
+        const chsHere = fileChanges.filter(ch => ovAnchorOf(ch, x) === i);
+        if (!convs.length && !ask && !chsHere.length) return null;
         const ctr = document.createElement('tr'); ctr.className = 'cmt'; const td = document.createElement('td'); td.colSpan = cols; const th = document.createElement('div'); th.className = 'thread';
         convs.forEach(t => { ovShown.add(t.id); th.appendChild(threadCard(t, lineEl)); });
+        chsHere.forEach(ch => { ovChgShown.add(ch.id); anchoredChg.add(ch.id); th.appendChild(changeCard(ch)); });
         if (ask) th.appendChild(askComposer(openAsk, lineEl));
         td.appendChild(th); ctr.appendChild(td); return ctr;
       };
@@ -648,7 +665,7 @@
         const ghs = ghAt(c.sha, f.path, refs);
         const comp = openComposer && !openComposer.replyTo && openComposer.commitIdx === current && openComposer.path === f.path && refs.some(r => openComposer.line === r.line && openComposer.side === r.side);
         const ask = openAsk && !openAsk.about && openAsk.newEnd == null && openAsk.commitIdx === current && openAsk.path === f.path && refs.some(r => openAsk.line === r.line && openAsk.side === r.side);
-        const chs = fileChanges.filter(x => refs.some(r => x.line === r.line && (x.side || 'RIGHT') === r.side));
+        const chs = fileChanges.filter(x => !ovChgShown.has(x.id) && refs.some(r => x.line === r.line && (x.side || 'RIGHT') === r.side));
         if (!here.length && !convs.length && !ghs.length && !chs.length && !comp && !ask) return null;
         const ctr = document.createElement('tr'); ctr.className = 'cmt'; const td = document.createElement('td'); td.colSpan = cols; const th = document.createElement('div'); th.className = 'thread';
         here.forEach(x => { anchored.add(x.id); th.appendChild(card(x)); });
