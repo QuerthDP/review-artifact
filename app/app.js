@@ -565,7 +565,7 @@
       // Accepted changes (and, faded, those being accepted) on the viewer's PR: the replaced lines struck in amber, the new ones drawn after them.
       const ovs = PR_MINE ? fileChanges.filter(x => x.status === 'accepted' || x.status === 'accepting') : [];
       const cols = split ? 4 : 3;
-      const cellNum = (side, line, cls) => '<td class="num ' + cls + '">' + (line != null ? '<span class="lbtns"><button class="addbtn" data-side="' + side + '" data-line="' + line + '" title="Queue a GitHub comment on this line" aria-label="Queue a GitHub comment on this line">+</button><button class="modbtn" title="Ask Claude to change this line" aria-label="Ask Claude to change this line">✎</button><button class="askbtn" title="Ask Claude about this line" aria-label="Ask Claude about this line">?</button></span>' + line : '') + '</td>';
+      const cellNum = (side, line, cls) => '<td class="num ' + cls + '">' + (line != null ? '<span class="lbtns"><button class="addbtn" data-side="' + side + '" data-line="' + line + '" title="Queue a GitHub comment on this line" aria-label="Queue a GitHub comment on this line">+</button>' + (side === 'RIGHT' ? '<button class="modbtn" title="Ask Claude to change this line" aria-label="Ask Claude to change this line">✎</button>' : '') + '<button class="askbtn" title="Ask Claude about this line" aria-label="Ask Claude about this line">?</button></span>' + line : '') + '</td>';
       const lang = langOf(f.path);
       const cellCode = (t, s, cls, range) => { let h = hl(s, lang); if (range) h = markRange(h, range[0], range[1]); return '<td class="code ' + cls + '">' + (t ? '<span class="marker">' + (t === 'a' ? '+' : t === 'd' ? '−' : ' ') + '</span>' + h : '') + '</td>'; };
       const emptyPair = (left) => '<td class="num ' + (left ? 'left ' : '') + 'empty"></td><td class="code ' + (left ? 'l' : 'r') + ' empty"></td>';
@@ -600,8 +600,10 @@
         const tr = document.createElement('tr'); tr.className = 'line ' + cls; tr.innerHTML = html;
         tr.dataset.ids = refs.map(r => rowId(current, f.path, r.line, r.side)).join(' ');
         tr.id = rowId(current, f.path, refs[refs.length - 1].line, refs[refs.length - 1].side);
-        tr.querySelectorAll('.askbtn').forEach(b => b.onclick = e => { const r = refs[refs.length - 1]; askAbout(withRange({ commit: c.sha, commitIdx: current, path: f.path, line: r.line, side: r.side }, tr, e)); });
-        tr.querySelectorAll('.modbtn').forEach(b => b.onclick = e => { const r = refs[refs.length - 1]; askAbout(withRange({ commit: c.sha, commitIdx: current, path: f.path, line: r.line, side: r.side, kind: 'modify' }, tr, e)); });
+        // A button acts on the side of the cell it sits in (the split view's old or new line).
+        const refOf = b => { const a = b.closest('.lbtns').querySelector('.addbtn'), sd = a && a.dataset.side; return refs.find(r => r.side === sd) || refs[refs.length - 1]; };
+        tr.querySelectorAll('.askbtn').forEach(b => b.onclick = e => { const r = refOf(b); askAbout(withRange({ commit: c.sha, commitIdx: current, path: f.path, line: r.line, side: r.side }, tr, e)); });
+        tr.querySelectorAll('.modbtn').forEach(b => b.onclick = e => { const r = refOf(b); askAbout(withRange({ commit: c.sha, commitIdx: current, path: f.path, line: r.line, side: r.side, kind: 'modify' }, tr, e)); });
         tr.querySelectorAll('.addbtn').forEach(b => b.onclick = e => { openComposer = withRange({ commit: c.sha, commitIdx: current, path: f.path, line: parseInt(b.dataset.line, 10), side: b.dataset.side }, tr, e); editing = null; renderAll(); setTimeout(() => { const t = document.getElementById('composer-ta'); if (t) t.scrollIntoView({ block: 'center' }); }, 0); });
         const rr = refs.find(r => r.side === 'RIGHT'), ov = rr ? ovs.filter(x => rr.line >= (x.startLine || x.line) && rr.line <= x.line) : [];
         // Lines an accepted change replaced are hidden (their comments and the change card still show below); a change being accepted strikes them.
@@ -1016,8 +1018,25 @@
   function flashRow(t) { if (!t.classList) return; t.classList.remove('flash'); void t.offsetWidth; t.classList.add('flash'); }
   // Keyboard cursor: one selected stop (file header, expander row or diff line) so the review can be done without a mouse.
   let cursorId = null;
+  // In the split view the cursor sits on one side of a line, the old (LEFT) or the new (RIGHT) version; ← / → switch it.
+  // The side sticks while moving; a row with nothing on that side shows the cursor on its other side.
+  let cursorSide = 'RIGHT';
+  const isSplitRow = el => viewMode === 'split' && el && el.matches && el.matches('#files tr.line, #files tr.ovnew');
+  const rowHas = (tr, side) => !!tr.querySelector(side === 'LEFT' ? 'td.code.l:not(.empty)' : 'td.code.r:not(.empty)');
+  const effSide = tr => !isSplitRow(tr) ? null : rowHas(tr, cursorSide) ? cursorSide : (cursorSide === 'LEFT' ? 'RIGHT' : 'LEFT');
   const stops = () => Array.from(document.querySelectorAll('#commit .gstop, #files .file-head, #files tr.line, #files tr.ovnew.done, #files tr.hunk')).filter(el => !el.closest('[hidden]') && (el.classList.contains('file-head') || !el.closest('.collapsed')));
-  function applyCursor() { document.querySelectorAll('.kcur').forEach(x => x.classList.remove('kcur')); const el = cursorId && document.getElementById(cursorId); if (el) el.classList.add('kcur'); }
+  function applyCursor() {
+    document.querySelectorAll('.kcur').forEach(x => x.classList.remove('kcur')); document.querySelectorAll('td.kcell').forEach(x => x.classList.remove('kcell', 'kfirst'));
+    const el = cursorId && document.getElementById(cursorId); if (!el) return; el.classList.add('kcur');
+    const sd = effSide(el); if (!sd) return;
+    const tds = el.children, k = sd === 'LEFT' ? 0 : 2; if (tds.length < 4) return;
+    tds[k].classList.add('kcell', 'kfirst'); tds[k + 1].classList.add('kcell');
+  }
+  // ← / → on a split line move the cursor to that side; with nowhere to go, the keys keep moving between the diff and the queue.
+  function sideKey(side) {
+    const cur = region === 'diff' && current_(); if (!isSplitRow(cur) || effSide(cur) === side || !rowHas(cur, side)) return false;
+    cursorSide = side; applyCursor(); return true;
+  }
   function setCursor(el, scroll) {
     if (!el || !el.id) return; cursorId = el.id; applyCursor(); savePos(); if (scroll === false) return;
     const r = el.getBoundingClientRect(), topPad = coverTop() + 12, botPad = 60;
@@ -1125,7 +1144,7 @@
     // A line an accepted change wrote exists only on the review branch: i and m talk to Claude about it (anchored at the
     // change's lines), while a GitHub comment has to wait until the branch is pushed to the PR. In the split view the
     // filled right side of a removed line counts as that new line.
-    const onNew = cur && cur.dataset && cur.dataset.chg && changes[cur.dataset.chg] && (cur.matches('tr.ovnew') || (viewMode === 'split' && sel !== '.addbtn' && cur.classList.contains('ovfill')));
+    const onNew = cur && cur.dataset && cur.dataset.chg && changes[cur.dataset.chg] && (cur.matches('tr.ovnew') || (viewMode === 'split' && cur.classList.contains('ovfill') && effSide(cur) === 'RIGHT'));
     if (onNew) {
       if (sel === '.addbtn') { toast('This line is only on the review branch: comment on it after Push to the PR'); return; }
       const x = changes[cur.dataset.chg];
@@ -1139,7 +1158,10 @@
       const chat = here && here.classList.contains('chat') ? here : cmt && cmt.classList.contains('cmt') ? Array.from(cmt.querySelectorAll('.thread > .chat')).filter(c => !c.querySelector('[data-act="restore"]')).pop() : null;
       const ta = chat && chat.querySelector('.followup textarea'); if (ta) { ta.scrollIntoView({ block: 'center' }); ta.focus(); return; }
     }
-    const btns = row.querySelectorAll(sel); const b = Array.from(btns).find(x => x.dataset.side === 'RIGHT') || btns[btns.length - 1]; if (b) b.click();
+    // The buttons of the side the cursor is on (the new side outside the split view, where each row has one side).
+    const side = effSide(cur) || 'RIGHT', sideOf = x => { const a = x.closest('.lbtns').querySelector('.addbtn'); return a && a.dataset.side; };
+    const btns = Array.from(row.querySelectorAll(sel)), b = isSplitRow(row) ? btns.find(x => sideOf(x) === side) : (btns.find(x => sideOf(x) === 'RIGHT') || btns[btns.length - 1]);
+    if (b) b.click(); else if (sel === '.modbtn') toast(side === 'LEFT' && isSplitRow(row) ? 'Claude changes the new code: press → for the new side' : 'Claude changes the new code: pick a new or unchanged line'); else toast('Nothing on this side of the line');
   }
   // v marks the file holding the cursor as viewed, or unmarks it; a viewed file collapses, so the cursor moves to its
   // header, and an unmarked one expands again.
@@ -1165,7 +1187,11 @@
     }
     else lineAction('.addbtn');
   }
-  document.addEventListener('click', e => { const el = e.target.closest && e.target.closest('#files tr.line, #files .file-head, #files tr.hunk'); if (el && el.id) { setCursor(el, false); toDiff(); } });
+  document.addEventListener('click', e => {
+    const el = e.target.closest && e.target.closest('#files tr.line, #files .file-head, #files tr.hunk'); if (!el || !el.id) return;
+    const td = e.target.closest('td'); if (isSplitRow(el) && td && el.children.length >= 4) { const sd = Array.from(el.children).indexOf(td) < 2 ? 'LEFT' : 'RIGHT'; if (rowHas(el, sd)) cursorSide = sd; }
+    setCursor(el, false); toDiff();
+  });
   let lastCmt = null;
   window.addEventListener('wheel', () => { lastCmt = null; }, { passive: true });
   window.addEventListener('touchmove', () => { lastCmt = null; }, { passive: true });
@@ -1241,7 +1267,7 @@
     if (e.shiftKey && region === 'diff' && ['J', 'L', 'ArrowUp', 'ArrowDown'].includes(e.key)) { e.preventDefault(); extendSel(e.key === 'J' || e.key === 'ArrowUp' ? -1 : 1); return; }
     if (selFrom && ['j', 'l', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', '[', ']'].includes(e.key)) clearSel();
     const keys = {
-      ']': () => go(current + 1), '[': () => go(current - 1), ArrowRight: () => toQueue(), ArrowLeft: () => toDiff(),
+      ']': () => go(current + 1), '[': () => go(current - 1), ArrowRight: () => sideKey('RIGHT') || toQueue(), ArrowLeft: () => sideKey('LEFT') || toDiff(),
       j: () => moveCursor(-1), ArrowUp: () => region === 'queue' ? moveQ(-1) : arrowMove(-1), l: () => moveCursor(1), ArrowDown: () => region === 'queue' ? moveQ(1) : arrowMove(1),
       PageUp: () => pageCursor(-1), PageDown: () => pageCursor(1),
       n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), v: () => toggleViewed(), t: () => showKeys(document.getElementById('keys-panel').hidden), f: () => toggleFeedback(), d: () => cardAction(['[data-act="dismiss"], .chat [data-act="restore"]', '[data-act="reject"], .card > .actions [data-act="restore"]', '[data-act="hidedisc"], [data-act="showdisc"]', '.change [data-act="decline"], .change [data-act="restorechg"]'], 'Nothing to dismiss here'), q: () => cardAction(['[data-act="approve"]', '.change [data-act="accept"]'], 'No proposed comment or change here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), c: () => toggleTop(), Enter: () => enterCursor()
