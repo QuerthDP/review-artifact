@@ -551,6 +551,21 @@
       notifyClaude(ch, ch.shellThreadId ? '[accept change ' + ch.id + ']' : 'apply it on the review branch', live || el, 'accept change').then(sid => writeChange(ch.id, { shellThreadId: sid || ch.shellThreadId || null, notifyError: sid || ch.shellThreadId ? null : notifyErr }));
     } finally { chgBusy.delete(ch.id); }
   }
+  // Sends the viewer's note on a proposed change to Claude, which rewrites the change in place.
+  const chgNotesInFlight = new Set();
+  async function sendChangeNote(ch, note, el) {
+    if (chgNotesInFlight.has(ch.id)) return; chgNotesInFlight.add(ch.id);
+    const was = editing; editing = null; renderAll();
+    try {
+      // A fresh notification (no shell thread of its own), so the request always carries its prefix.
+      const sid = await notifyClaude({ id: ch.id, path: ch.path || null, line: ch.line || null, startLine: ch.startLine || null }, note, el, 'change revision request');
+      const at = new Date().toISOString();
+      const discussion = (ch.discussion || []).concat([{ role: 'user', text: note, at }]);
+      const ok = await writeChange(ch.id, { note, noteAt: at, discussion, notifyError: sid || !notifyErr ? null : notifyErr });
+      if (ok) { dropDraft('ta-chg-' + ch.id); toast(sid || !notifyErr ? 'Sent to Claude' : 'Saved; Claude not notified'); }
+      else { editing = was; renderAll(); }
+    } finally { chgNotesInFlight.delete(ch.id); }
+  }
   function changeCard(ch) {
     const st = ch.status || 'proposed', d = document.createElement('div'); d.className = 'card change cs-' + st; d.id = 'chg-' + ch.id; d.dataset.chg = ch.id;
     const fold = st === 'accepted' || st === 'declined' || st === 'stale', folded = fold && !chgOpen.has(ch.id);
@@ -560,17 +575,29 @@
     const pill = st !== 'accepted' ? '' : PR_MINE && ch.applied === false ? '<span class="pill revise" title="Claude is putting it on the review branch; no need to wait">applying' + WAIT_DOTS + '</span>' : !PR_MINE ? '<button class="pill queued linkbtn" data-act="gocomment" title="Go to the comment in your queue">' + (ch.path ? 'suggestion' : 'comment') + ' queued</button>' : ch.commitUrl ? '<a class="pill queued" href="' + esc(ch.commitUrl) + '" target="_blank" rel="noopener">' + (sha ? sha + ' on ' : 'on ') + br + '</a>' : '<span class="pill queued">' + (sha ? sha + ' on ' : 'on ') + br + '</span>';
     const tip = PR_MINE ? (ch.path ? 'Claude folds it into the commit' : ch.op === 'drop' ? 'Claude drops the commit' : 'Claude rewrites the commit message') + ' and pushes the review branch to your fork' : ch.path ? 'Queues it as a GitHub suggestion in your pending review' : 'Queues it as a commit-level comment in your pending review';
     const acc = '<button class="btn primary small" data-act="accept" title="' + tip + '">' + (st === 'failed' ? 'Retry' : 'Accept') + '</button>', dec = '<button class="btn small" data-act="decline">Decline</button>';
-    const acts = st === 'proposed' || st === 'failed' ? acc + dec : st === 'declined' ? '<button class="btn small" data-act="restorechg">Restore</button>' : st === 'stale' ? dec : '';
+    // Like a Claude comment, a change can go back to Claude with a note; it stays proposed (and cannot be accepted) until
+    // Claude rewrites it, and the notes and Claude's replies stay on the card.
+    const revising = !!ch.note, revEd = editing === 'chg:' + ch.id && !revising && (st === 'proposed' || st === 'failed');
+    const rev = '<button class="btn small" data-act="revisechg">Ask Claude to revise</button>';
+    const acts = st === 'proposed' || st === 'failed' ? (revising ? '<button class="btn small" data-act="withdrawrevchg">Withdraw request</button>' + dec : revEd ? '' : acc + rev + dec) : st === 'declined' ? '<button class="btn small" data-act="restorechg">Restore</button>' : st === 'stale' ? dec : '';
     const toggle = fold ? '<button class="btn small" data-act="expand">' + (folded ? 'Show change' : 'Hide change') + '</button>' : '';
     const wait = st === 'accepting' ? '<div class="pending">Waiting for Claude' + WAIT_DOTS + (ch.shellThreadId || !ch.notifyError ? '' : ' (not notified: tell Claude in chat to apply accepted changes)') + '</div>' : '';
     const err = st === 'failed' && ch.error ? '<div class="note chgerr">' + md(ch.error) + '</div>' : '';
-    d.innerHTML = '<div class="card-head">' + title + spill + '<span>' + esc(chgWhere(ch)) + '</span>' + pill + toggle + (fold ? acts : '') + '</div>' + (folded ? '' : (ch.reason ? '<div class="body">' + md(ch.reason) + '</div>' : '') + miniDiff(ch) + err + wait + (!fold && acts ? '<div class="actions">' + acts + '</div>' : ''));
+    const msgs = (ch.discussion || []).map(m => '<div class="msg-row ' + m.role + '"><span class="who">' + (m.role === 'claude' ? 'Claude' : 'You') + '</span><div class="body">' + md(m.text) + '</div></div>').join('');
+    const revWait = revising ? '<div class="pending">Waiting for Claude to revise it' + WAIT_DOTS + (ch.notifyError ? ' (not notified: tell Claude in chat to pick up change revision requests)' : '') + '</div>' : '';
+    const disc = msgs || revWait ? '<div class="discussion">' + msgs + revWait + '</div>' : '';
+    const box = revEd ? '<div class="revise"><div class="hint">Tell Claude how to change it. The change stays as is until Claude rewrites it.</div><textarea id="ta-chg-' + ch.id + '" placeholder="e.g. keep the old name, also update the caller, use a match instead"></textarea><div class="actions"><button class="btn primary small" data-act="sendchgnote">Send to Claude</button><button class="btn small" data-act="cancelrevchg">Cancel</button></div></div>' : '';
+    d.innerHTML = '<div class="card-head">' + title + spill + (revising ? '<span class="pill revise">revision requested</span>' : '') + '<span>' + esc(chgWhere(ch)) + '</span>' + pill + toggle + (fold ? acts : '') + '</div>' + (folded ? '' : (ch.reason ? '<div class="body">' + md(ch.reason) + '</div>' : '') + miniDiff(ch) + err + wait + disc + box + (!fold && acts ? '<div class="actions">' + acts + '</div>' : ''));
     d.addEventListener('click', e => {
       const b = e.target.closest && e.target.closest('[data-act]'), act = b && b.dataset.act; if (!act) return;
       const at = new Date().toISOString();
       if (act === 'accept') acceptChange(ch, d);
       else if (act === 'decline') writeChange(ch.id, { status: 'declined', decidedAt: at }).then(ok => { if (ok) toast('Declined'); });
       else if (act === 'restorechg') writeChange(ch.id, { status: 'proposed', decidedAt: null }).then(ok => { if (ok) toast('Back to proposed'); });
+      else if (act === 'revisechg') { editing = 'chg:' + ch.id; openComposer = null; renderAll(); setTimeout(() => { const t = document.getElementById('ta-chg-' + ch.id); if (t) { t.scrollIntoView({ block: 'center' }); t.focus(); } }, 0); }
+      else if (act === 'cancelrevchg') { editing = null; renderAll(); }
+      else if (act === 'sendchgnote') { const v = document.getElementById('ta-chg-' + ch.id).value.trim(); if (v) sendChangeNote(ch, v, d); }
+      else if (act === 'withdrawrevchg') writeChange(ch.id, { note: null, noteAt: null }).then(ok => { if (ok) toast('Request withdrawn'); });
       else if (act === 'expand') { if (chgOpen.has(ch.id)) chgOpen.delete(ch.id); else chgOpen.add(ch.id); renderFiles(); }
       else if (act === 'gocomment') { const c = comments[ch.commentId]; if (c) jumpTo(onOv(c) ? null : c.commit, 'cds-' + c.id); else toast('The suggestion is not loaded yet'); }
     });
@@ -975,7 +1002,7 @@
   ['input', 'keyup', 'click'].forEach(ev => document.addEventListener(ev, e => { if (e.target.tagName === 'TEXTAREA') { focusPos = e.target.selectionStart; lsSet('focuspos', String(focusPos)); } }));
   // Sending a message (or saving a comment) ends the typing: the box loses focus and is not focused again by the re-render,
   // so the keyboard shortcuts work right away.
-  const SEND_BTNS = '#ask-send, #composer-save, [data-act="followup"], [data-act="sendnote"], [data-act="saveedit"]';
+  const SEND_BTNS = '#ask-send, #composer-save, [data-act="followup"], [data-act="sendnote"], [data-act="sendchgnote"], [data-act="saveedit"]';
   document.addEventListener('click', e => {
     if (!e.target.closest || !e.target.closest(SEND_BTNS)) return;
     lsSet('focus', ''); setTimeout(() => { const a = document.activeElement; if (a && a.tagName === 'TEXTAREA' && a.blur) a.blur(); lsSet('focus', ''); }, 0);
@@ -1337,6 +1364,7 @@
       const here = current_(), pick = '.card, .chat, .ghthread';
       const item = lastCmt ? (lastCmt.matches(pick) ? lastCmt : lastCmt.querySelector('.thread > .card, .thread > .chat, .thread > .ghthread')) : here && here.matches(pick) ? here : null;
       if (item && item.matches('.chat')) { const ta = item.querySelector('.followup textarea'); if (ta) { ta.scrollIntoView({ block: 'center' }); ta.focus(); return; } }
+      if (item && item.matches('.card.change')) { const rb = item.querySelector('[data-act="revisechg"]'); if (rb) rb.click(); else toast(item.querySelector('[data-act="withdrawrevchg"]') ? 'Already with Claude' : 'Only a proposed change can be revised'); return; }
       const c = item && item.matches('.card') && comments[item.dataset.cid];
       if (c) {
         const rev = Array.from(item.querySelectorAll('[data-act="edit"]')).find(x => x.textContent === 'Ask Claude to revise');

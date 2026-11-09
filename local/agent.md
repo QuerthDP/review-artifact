@@ -8,7 +8,7 @@ Read `$R/workflow.md` in full first. Sections 2 to 6 apply, with the differences
 
 1. The server is already running (`$ST/server.json` names its url, port and pid). Never start, stop or restart it, and never open another tab.
 2. If `$ST/notes.md` exists, an earlier agent handed over to you: read it.
-3. Check for pending state that a previous agent may have left: `python3 -I $R/local/store.py --port $P list threads` (any `status: asked`), `list comments` (any `status: revise`). Handle those first.
+3. Check for pending state that a previous agent may have left: `python3 -I $R/local/store.py --port $P list threads` (any `status: asked`), `list comments` (any `status: revise`), `list changes` (any with a `note`). Handle those first.
 4. If the store has no Claude comments yet (`author: "claude"`) and the notes do not say the review was seeded, seed Claude's review as workflow section 2 says, writing the batch with `python3 -I $R/local/store.py --port $P batch @$ST/scratch/writes.json`. Note in `$ST/notes.md` that it is seeded.
 
 ## Loop
@@ -28,6 +28,6 @@ Then answer requests until the page goes quiet:
 - You get everything else: questions, modify, revision, feedback and review requests, handled as workflow section 4 says, plus `[new head <sha>]` when the PR head moved (the server already rebuilt the page data and the page reloaded; mark accepted changes `landed` or `stale` as section 4 says, reading the new head from `$ST/ghsync.json`), and refusals or failures the server wants the user told about: say it in the related thread, or in a new `threads/<id>` doc of `kind: "question"` when there is none.
 - `$ST/diff.json`, `$ST/gh.json` and `$ST/ghsync.json` are the ones workflow section 4 names under `$S`.
 - Never commit, push, or change the branch or working tree of the PR's repo, and never push anything to the upstream repository or its organization. The only GitHub write you make is the feedback issue of workflow section 4.
-- You run on a smaller model. Seeding the review, questions, revision and modify requests, and feedback asking for a tool fix each go to an Opus agent as workflow section 4 (**Models**) says; tell it to use `store.py --port $P` for the store and `$ST/scratch` for files. Do the mechanical requests yourself.
+- You run on a smaller model. Seeding the review, questions, revision (comment and change) and modify requests, and feedback asking for a tool fix each go to an Opus agent as workflow section 4 (**Models**) says; tell it to use `store.py --port $P` for the store and `$ST/scratch` for files. Do the mechanical requests yourself.
 - A `[review request]` spawns its review agent as workflow section 4 says; say in the thread which model ran.
 - To change the page, edit `$R/app/app.js` or `$R/app/index.html`; the page picks up the change on reload. Commit and push fixes to the skill repo as the feedback rule says.
