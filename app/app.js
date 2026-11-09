@@ -192,7 +192,7 @@
     const pending = t.status === 'asked' ? '<div class="pending">Waiting for Claude' + WAIT_DOTS + (t.shellThreadId || !t.notifyError ? '' : ' (not notified: tell Claude in chat to answer page questions)') + '</div>' : '';
     d.innerHTML = '<div class="card-head"><b>' + (t.draft === 'reply' ? 'Reply draft asked of Claude' : t.kind === 'modify' ? 'Change request to Claude' : t.kind === 'feedback' ? 'Feedback on the tool' : 'Conversation with Claude') + '</b>' + (t.path || t.kind === 'feedback' ? '' : '<span>commit-level</span>') + (t.dismissed ? '<span class="pill rejected">dismissed</span><button class="btn small dismiss" data-act="restore">Restore</button>' : t.status === 'answered' ? '<button class="btn small dismiss" data-act="dismiss" title="Hide this answered conversation; it can be restored from the queue">Dismiss</button>' : '') + '</div>' + msgs + pending + (t.commentId && comments[t.commentId] ? '<div class="made"><button class="btn small" data-act="gocomment">Go to the comment Claude drafted</button></div>' : '') + (t.changeId && changes[t.changeId] && changes[t.changeId].status !== 'landed' ? '<div class="made"><button class="btn small" data-act="gochange">Go to the proposed change</button></div>' : '') + '<div class="followup"><textarea id="fu-' + t.id + '" placeholder="Follow up"></textarea><button class="btn small ask" data-act="followup">Send</button></div>';
     const gc = d.querySelector('[data-act="gocomment"]'); if (gc) gc.onclick = () => { const el = document.getElementById('cds-' + t.commentId); if (el) { setCursor(el, false); el.scrollIntoView({ block: 'center' }); flashRow(el); } };
-    const gch = d.querySelector('[data-act="gochange"]'); if (gch) gch.onclick = () => jumpTo(changes[t.changeId].commit, 'chg-' + t.changeId);
+    const gch = d.querySelector('[data-act="gochange"]'); if (gch) gch.onclick = () => { const x = changes[t.changeId], sc = x && asComment(x); if (sc) jumpTo(onOv(sc) ? null : sc.commit, 'cds-' + sc.id); else jumpTo(x.commit, 'chg-' + t.changeId); };
     d.querySelector('[data-act="followup"]').onclick = () => { const ta = d.querySelector('#fu-' + t.id); const v = ta.value.trim(); if (v) sendFollowUp(t, v, el); };
     const dm = d.querySelector('[data-act="dismiss"], [data-act="restore"]');
     if (dm) dm.onclick = () => writeThread(t.id, { dismissed: dm.dataset.act === 'dismiss', updatedAt: new Date().toISOString() }, false);
@@ -422,11 +422,11 @@
     const d = document.createElement('div'); d.className = 'card ' + c.status; d.dataset.cid = c.id; d.id = 'cds-' + c.id;
     let actions = '';
     const badge = c.author === 'claude' ? '<span class="pill claude">Generated with Claude Code</span>' + (c.humanReviewed ? '<span class="pill queued">Reviewed by Human</span>' : '') : '<b>' + who + '</b>';
-    const head = '<div class="card-head">' + badge + '<span class="pill ' + c.status + '">' + (c.status === 'revise' ? 'revision requested' : c.status) + '</span>' + (c.editedByUser ? '<span>edited by you</span>' : '') + (c.revisedAt ? '<span>revised by Claude</span>' : '') + (c.path ? (c.line ? (c.startLine ? '<span>lines ' + c.startLine + '–' + c.line + '</span>' : '') : '<span>file-level</span>') : '<span>commit-level</span>') + (c.replyToConv && c.status === 'queued' ? '<span class="pill proposed">waits for "Post queued conversation replies"</span>' : c.syncPending ? '<span class="pill revise">syncing to GitHub…</span>' : c.status === 'queued' && c.deferred ? '<span class="pill proposed" title="' + esc(DEFER_WHY[c.deferred] || c.deferred) + '">added at submit</span>' : c.source === 'github' || (c.inDraft && c.status === 'queued') ? '<span class="pill posted">in your GitHub draft</span>' : '') + ghWarn(c) + '</div>';
+    const head = '<div class="card-head">' + badge + (chgOfComment(c) ? '<span class="pill queued" title="Accepted from a change Claude proposed">accepted change</span>' : '') + '<span class="pill ' + c.status + '">' + (c.status === 'revise' ? 'revision requested' : c.status) + '</span>' + (c.editedByUser ? '<span>edited by you</span>' : '') + (c.revisedAt ? '<span>revised by Claude</span>' : '') + (c.path ? (c.line ? (c.startLine ? '<span>lines ' + c.startLine + '–' + c.line + '</span>' : '') : '<span>file-level</span>') : '<span>commit-level</span>') + (c.replyToConv && c.status === 'queued' ? '<span class="pill proposed">waits for "Post queued conversation replies"</span>' : c.syncPending ? '<span class="pill revise">syncing to GitHub…</span>' : c.status === 'queued' && c.deferred ? '<span class="pill proposed" title="' + esc(DEFER_WHY[c.deferred] || c.deferred) + '">added at submit</span>' : c.source === 'github' || (c.inDraft && c.status === 'queued') ? '<span class="pill posted">in your GitHub draft</span>' : '') + ghWarn(c) + '</div>';
     // The revision box opens under the conversation already held with Claude, which stays visible.
     const pastMsgs = (c.discussion || []).map(m => '<div class="msg-row ' + m.role + '"><span class="who">' + (m.role === 'claude' ? 'Claude' : 'You') + '</span><div class="body">' + md(m.text) + '</div></div>').join('');
     if (editing === c.id && c.author === 'claude') {
-      d.innerHTML = head + '<div class="body">' + md(c.body) + '</div>' + (pastMsgs ? '<div class="discussion">' + pastMsgs + '</div>' : '') + '<div class="revise"><div class="hint">Tell Claude what to change. The comment stays as is until Claude rewrites it.</div><textarea id="ta-' + c.id + '" placeholder="e.g. shorter, drop the sudo detail, suggest skipping CLONE_NEWUSER when root instead"></textarea><div class="actions"><button class="btn primary small" data-act="sendnote">Send to Claude</button><button class="btn small" data-act="canceledit">Cancel</button></div></div>';
+      d.innerHTML = head + '<div class="body">' + commentBody(c) + '</div>' + (pastMsgs ? '<div class="discussion">' + pastMsgs + '</div>' : '') + '<div class="revise"><div class="hint">Tell Claude what to change. The comment stays as is until Claude rewrites it.</div><textarea id="ta-' + c.id + '" placeholder="e.g. shorter, drop the sudo detail, suggest skipping CLONE_NEWUSER when root instead"></textarea><div class="actions"><button class="btn primary small" data-act="sendnote">Send to Claude</button><button class="btn small" data-act="canceledit">Cancel</button></div></div>';
     } else if (editing === c.id) {
       d.innerHTML = head + '<textarea id="ta-' + c.id + '">' + esc(c.body) + '</textarea><div class="actions"><button class="btn primary small" data-act="saveedit">Save and queue</button><button class="btn small" data-act="canceledit">Cancel</button></div>';
     } else {
@@ -446,7 +446,7 @@
       // The conversation with Claude under a comment can be dismissed once it is settled; a new request shows it again.
       const hideBtn = msgs && !wait ? '<button class="btn small dismiss" data-act="hidedisc" title="Hide this conversation with Claude">Dismiss conversation</button>' : '';
       const note = c.discussionHidden && msgs && !wait ? '<div class="discussion"><button class="btn small" data-act="showdisc">Show conversation with Claude (' + (disc.length + legacy.length) + ')</button></div>' : msgs || wait ? '<div class="discussion">' + msgs + wait + hideBtn + '</div>' : '';
-      d.innerHTML = head + '<div class="body">' + md(c.body) + '</div>' + note + (actions ? '<div class="actions">' + actions + '</div>' : '');
+      d.innerHTML = head + '<div class="body">' + commentBody(c) + '</div>' + note + (actions ? '<div class="actions">' + actions + '</div>' : '');
       aboutChats(c.id, d).forEach(x => d.appendChild(x));
     }
     d.addEventListener('click', e => {
@@ -472,6 +472,16 @@
     if (!db) { toast('Store unavailable'); return false; }
     try { await db.collection('changes').doc(id).update(data); return true; }
     catch (e) { toast('Could not save: ' + (e && e.code || 'error')); return false; }
+  }
+  // On someone else's PR an accepted change lives on as its queued suggestion comment: one card shows both, not two.
+  const asComment = ch => !PR_MINE && ch.status === 'accepted' && ch.commentId && comments[ch.commentId] ? comments[ch.commentId] : null;
+  const chgOfComment = c => Object.values(changes).find(x => x.commentId === c.id && asComment(x)) || null;
+  // The suggestion block of such a comment reads as the change's own old-to-new diff.
+  function commentBody(c) {
+    const ch = c.path && chgOfComment(c), m = ch && /```suggestion\n([\s\S]*?)```/.exec(c.body || '');
+    if (!m) return md(c.body);
+    const nw = m[1] ? m[1].replace(/\n$/, '').split('\n') : [];
+    return md(c.body.slice(0, m.index).trimEnd()) + miniDiff({ path: c.path, old: ch.old, new: nw }) + md(c.body.slice(m.index + m[0].length).trim());
   }
   const changesAt = (sha, path, refs) => Object.values(changes).filter(x => x.status !== 'landed' && x.commit === sha && x.path === path && x.line && (!refs || refs.some(r => x.line === r.line && (x.side || 'RIGHT') === r.side)));
   // Jump to a card or row by id, on its own commit, unfolding its file.
@@ -643,7 +653,7 @@
     const orphan = byCommit(c.sha).filter(x => x.path && !paths.has(x.path));
     g.innerHTML = '<h3>Commit-level comments and conversations</h3>';
     gen.forEach(x => g.appendChild(card(x)));
-    const h2 = el.querySelector('h2'), cchg = commitChanges(c.sha);
+    const h2 = el.querySelector('h2'), cchg = commitChanges(c.sha).filter(x => !asComment(x));
     cchg.forEach(x => g.appendChild(changeCard(x)));
     // Accepted commit changes live on the review branch: show the commit as it is there (the new message; a dropped commit
     // keeps its diff and its card says it is gone). A change still being accepted is previewed under the old title.
@@ -696,7 +706,7 @@
       const table = document.createElement('table'); table.className = 'diff' + (split ? ' split' : '');
       const tbody = document.createElement('tbody');
       const fileComments = byCommit(c.sha).filter(x => x.path === f.path && x.line && !isReply(x));
-      const anchored = new Set(), anchoredChg = new Set(), fileChanges = changesAt(c.sha, f.path, null);
+      const anchored = new Set(), anchoredChg = new Set(), fileChanges = changesAt(c.sha, f.path, null).filter(x => !asComment(x));
       // Accepted changes (and, faded, those being accepted) on the viewer's PR: the replaced lines struck in amber, the new ones drawn after them.
       const ovs = PR_MINE ? fileChanges.filter(x => x.status === 'accepted' || x.status === 'accepting') : [];
       const cols = split ? 4 : 3;
