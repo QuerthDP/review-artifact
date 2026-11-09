@@ -45,6 +45,8 @@
       const b = document.createElement('button'); b.className = 'btn small'; b.textContent = 'Reply (queue to your GitHub draft)';
       b.onclick = () => { openComposer = { commit: t.commit, commitIdx: current, path: t.path, line: t.line, side: t.side, replyTo: t.id }; editing = null; renderAll(); };
       const row = document.createElement('div'); row.className = 'actions'; row.appendChild(b);
+      const last = t.comments[t.comments.length - 1];
+      row.appendChild(draftReplyBtn({ commit: t.commit, commitIdx: current, path: t.path || null, line: t.line || null, side: t.side || null, about: t.id, aboutText: last.author + ': ' + cleanTextOf(last.html) }));
       if (R.cfg.local) row.appendChild(ghResolveBtn(t));
       else if (!t.resolved) {
         const on = ghLocalRes(t), r = document.createElement('button'); r.className = 'btn small'; r.dataset.act = on ? 'ghunresolve' : 'ghresolve';
@@ -77,6 +79,13 @@
       }
     };
     return r;
+  }
+  // Claude drafts a reply to a reviewer thread or a PR conversation comment: an optional note says what it should say,
+  // and Claude proposes the reply as a card under that comment, to queue, revise or reject like any other.
+  function draftReplyBtn(anchor) {
+    const b = document.createElement('button'); b.className = 'btn small ask'; b.dataset.act = 'draftreply';
+    b.textContent = '✎ Ask Claude to draft a reply'; b.title = 'Claude proposes a reply as a card you can queue, revise or reject (a)';
+    b.onclick = () => askAbout(Object.assign({ draft: 'reply' }, anchor)); return b;
   }
   function cleanTextOf(h) { const d = document.createElement('div'); d.innerHTML = cleanHTML(h || ''); return (d.textContent || '').replace(/\s+/g, ' ').trim(); }
   function ghAt(sha, path, refs) { return GH.threads.filter(t => t.commit === sha && t.path === path && (refs ? refs.some(r => t.line === r.line && t.side === r.side) : !t.line)); }
@@ -137,8 +146,9 @@
   async function sendQuestion(anchor, text, el) {
     if (sending) return; sending = true;
     const id = 'q_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
-    const t = { id, kind: anchor.kind || 'question', commit: anchor.commit, path: anchor.path || null, line: anchor.line || null, startLine: anchor.startLine || null, side: anchor.side || null, about: anchor.about || null, onChange: anchor.onChange || null, newLine: anchor.newLine || null, newStart: anchor.newStart != null ? anchor.newStart : null, newEnd: anchor.newEnd != null ? anchor.newEnd : null, status: 'asked', messages: [{ role: 'user', text, at: new Date().toISOString() }], createdAt: new Date().toISOString() };
+    const t = { id, kind: anchor.kind || 'question', commit: anchor.commit, path: anchor.path || null, line: anchor.line || null, startLine: anchor.startLine || null, side: anchor.side || null, about: anchor.about || null, draft: anchor.draft || null, replyToConv: anchor.replyToConv || null, convAuthor: anchor.convAuthor || null, onChange: anchor.onChange || null, newLine: anchor.newLine || null, newStart: anchor.newStart != null ? anchor.newStart : null, newEnd: anchor.newEnd != null ? anchor.newEnd : null, status: 'asked', messages: [{ role: 'user', text, at: new Date().toISOString() }], createdAt: new Date().toISOString() };
     const aboutNote = (anchor.aboutText ? '\n\n(about the comment: "' + anchor.aboutText.replace(/\s+/g, ' ').trim().slice(0, 300) + '")' : '')
+      + (anchor.draft === 'reply' ? '\n\n(draft a reply: propose it as a Claude comment doc replying to ' + (anchor.replyToConv ? 'PR conversation comment ' + anchor.replyToConv : 'reviewer thread ' + anchor.about) + ')' : '')
       + (anchor.onChange ? '\n\n(on ' + (anchor.newEnd != null && anchor.newEnd > anchor.newStart ? 'lines ' + (anchor.newStart + 1) + '-' + (anchor.newEnd + 1) : anchor.newStart != null ? 'line ' + (anchor.newStart + 1) : 'a line') + ' of the new lines accepted change ' + anchor.onChange + ' wrote, only on the review branch: "' + String(anchor.newLine || '').trim().slice(0, 600) + '")' : '');
     const shellThreadId = await notifyClaude(t, text + aboutNote, el, t.kind === 'modify' ? 'modify request' : t.kind === 'feedback' ? 'feedback request' : 'page question');
     const ok = await writeThread(id, Object.assign({}, t, { shellThreadId, notifyError: shellThreadId ? null : notifyErr }), true);
@@ -161,11 +171,11 @@
     if (anchor.kind !== 'feedback') noteDraftAt('a|' + draftKey(anchor), anchor);
     const d = document.createElement('div'); d.className = 'composer'; d.style.borderColor = 'var(--posted)';
     const where = anchor.path ? anchor.path + lineLabel(anchor) : 'commit ' + COMMITS[anchor.commitIdx].short;
-    const mod = anchor.kind === 'modify', fb = anchor.kind === 'feedback';
-    const hint = fb ? 'Claude writes it up and files an issue on <a href="https://github.com/' + FEEDBACK_REPO + '" target="_blank" rel="noopener">' + FEEDBACK_REPO + '</a>, then replies here with the issue link' : mod ? 'Ask Claude to change · ' + esc(where) + ' · ' + (PR_MINE ? 'Claude proposes the change as a card; Accept folds it into the commit and pushes the review branch to your fork' : 'Claude proposes the change as a card; Accept queues it as a GitHub suggestion') : 'Ask Claude · ' + esc(where) + ' · the question and answer stay here on the page';
-    d.innerHTML = '<div class="hint">' + hint + '</div><textarea id="ask-ta" data-draft="' + (fb ? 'fb' : 'a|' + esc(draftKey(anchor))) + '" placeholder="' + (fb ? 'What bothers you about the tool, or what is missing?' : mod ? (anchor.path ? 'What should change here?' : 'Reword the message, drop the commit, or rework it as a whole?') : 'What do you want to know about this code?') + '"></textarea><div class="actions"><button class="btn primary small" id="ask-send">' + (fb ? 'Send to Claude' : mod ? 'Ask Claude to change it' : 'Ask Claude') + '</button><button class="btn small" id="ask-cancel">Cancel</button></div>';
+    const mod = anchor.kind === 'modify', fb = anchor.kind === 'feedback', rep = anchor.draft === 'reply';
+    const hint = rep ? 'Ask Claude to draft a reply' + (anchor.convAuthor ? ' to ' + esc(anchor.convAuthor) + ' in the PR conversation' : '') + ' · Claude proposes it as a card under the comment, to queue, revise or reject' : fb ? 'Claude writes it up and files an issue on <a href="https://github.com/' + FEEDBACK_REPO + '" target="_blank" rel="noopener">' + FEEDBACK_REPO + '</a>, then replies here with the issue link' : mod ? 'Ask Claude to change · ' + esc(where) + ' · ' + (PR_MINE ? 'Claude proposes the change as a card; Accept folds it into the commit and pushes the review branch to your fork' : 'Claude proposes the change as a card; Accept queues it as a GitHub suggestion') : 'Ask Claude · ' + esc(where) + ' · the question and answer stay here on the page';
+    d.innerHTML = '<div class="hint">' + hint + '</div><textarea id="ask-ta" data-draft="' + (fb ? 'fb' : 'a|' + esc(draftKey(anchor))) + '" placeholder="' + (rep ? 'What should the reply say? (optional; Enter sends)' : fb ?'What bothers you about the tool, or what is missing?' : mod ? (anchor.path ? 'What should change here?' : 'Reword the message, drop the commit, or rework it as a whole?') : 'What do you want to know about this code?') + '"></textarea><div class="actions"><button class="btn primary small" id="ask-send">' + (rep ? 'Ask Claude to draft it' : fb ? 'Send to Claude' : mod ? 'Ask Claude to change it' : 'Ask Claude') + '</button><button class="btn small" id="ask-cancel">Cancel</button></div>';
     if (mod) d.style.borderColor = 'var(--proposed)';
-    d.querySelector('#ask-send').onclick = () => { const v = d.querySelector('#ask-ta').value.trim(); if (v) sendQuestion(anchor, v, el); };
+    d.querySelector('#ask-send').onclick = () => { const v = d.querySelector('#ask-ta').value.trim() || (rep ? 'Draft a reply to this comment.' : ''); if (v) sendQuestion(anchor, v, el); };
     d.querySelector('#ask-cancel').onclick = () => { dropDraft(fb ? 'fb' : 'a|' + draftKey(anchor)); openAsk = null; renderAll(); };
     if (!fb) setTimeout(() => { const t = d.querySelector('#ask-ta'); if (t) t.focus(); }, 0);
     return d;
@@ -174,7 +184,7 @@
     const d = document.createElement('div'); d.className = 'chat'; d.id = 'chs-' + t.id;
     const msgs = (t.messages || []).map(m => '<div class="msg-row ' + m.role + '"><span class="who">' + (m.role === 'claude' ? 'Claude' : 'You') + '</span><div class="body">' + md(m.text) + '</div></div>').join('');
     const pending = t.status === 'asked' ? '<div class="pending">Waiting for Claude' + WAIT_DOTS + (t.shellThreadId || !t.notifyError ? '' : ' (not notified: tell Claude in chat to answer page questions)') + '</div>' : '';
-    d.innerHTML = '<div class="card-head"><b>' + (t.kind === 'modify' ? 'Change request to Claude' : t.kind === 'feedback' ? 'Feedback on the tool' : 'Conversation with Claude') + '</b>' + (t.path || t.kind === 'feedback' ? '' : '<span>commit-level</span>') + (t.dismissed ? '<span class="pill rejected">dismissed</span><button class="btn small dismiss" data-act="restore">Restore</button>' : t.status === 'answered' ? '<button class="btn small dismiss" data-act="dismiss" title="Hide this answered conversation; it can be restored from the queue">Dismiss</button>' : '') + '</div>' + msgs + pending + (t.commentId && comments[t.commentId] ? '<div class="made"><button class="btn small" data-act="gocomment">Go to the comment Claude drafted</button></div>' : '') + (t.changeId && changes[t.changeId] && changes[t.changeId].status !== 'landed' ? '<div class="made"><button class="btn small" data-act="gochange">Go to the proposed change</button></div>' : '') + '<div class="followup"><textarea id="fu-' + t.id + '" placeholder="Follow up"></textarea><button class="btn small ask" data-act="followup">Send</button></div>';
+    d.innerHTML = '<div class="card-head"><b>' + (t.draft === 'reply' ? 'Reply draft asked of Claude' : t.kind === 'modify' ? 'Change request to Claude' : t.kind === 'feedback' ? 'Feedback on the tool' : 'Conversation with Claude') + '</b>' + (t.path || t.kind === 'feedback' ? '' : '<span>commit-level</span>') + (t.dismissed ? '<span class="pill rejected">dismissed</span><button class="btn small dismiss" data-act="restore">Restore</button>' : t.status === 'answered' ? '<button class="btn small dismiss" data-act="dismiss" title="Hide this answered conversation; it can be restored from the queue">Dismiss</button>' : '') + '</div>' + msgs + pending + (t.commentId && comments[t.commentId] ? '<div class="made"><button class="btn small" data-act="gocomment">Go to the comment Claude drafted</button></div>' : '') + (t.changeId && changes[t.changeId] && changes[t.changeId].status !== 'landed' ? '<div class="made"><button class="btn small" data-act="gochange">Go to the proposed change</button></div>' : '') + '<div class="followup"><textarea id="fu-' + t.id + '" placeholder="Follow up"></textarea><button class="btn small ask" data-act="followup">Send</button></div>';
     const gc = d.querySelector('[data-act="gocomment"]'); if (gc) gc.onclick = () => { const el = document.getElementById('cds-' + t.commentId); if (el) { setCursor(el, false); el.scrollIntoView({ block: 'center' }); flashRow(el); } };
     const gch = d.querySelector('[data-act="gochange"]'); if (gch) gch.onclick = () => jumpTo(changes[t.changeId].commit, 'chg-' + t.changeId);
     d.querySelector('[data-act="followup"]').onclick = () => { const ta = d.querySelector('#fu-' + t.id); const v = ta.value.trim(); if (v) sendFollowUp(t, v, el); };
@@ -262,7 +272,7 @@
   function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
   // Unsent text and open composers survive a page reload; a draft goes away when it is sent or cancelled.
-  const draftKey = a => [a.kind || '', a.commit, a.path || '', a.line || '', a.side || '', a.replyTo || '', a.replyToConv || ''].join('|') + (a.about ? '|@' + a.about : '') + (a.onChange ? '|~' + a.onChange + ':' + a.newStart + '-' + a.newEnd : '');
+  const draftKey = a => [a.kind || '', a.commit, a.path || '', a.line || '', a.side || '', a.replyTo || '', a.replyToConv || ''].join('|') + (a.about ? '|@' + a.about : '') + (a.draft ? '|' + a.draft : '') + (a.onChange ? '|~' + a.onChange + ':' + a.newStart + '-' + a.newEnd : '');
   let drafts = {}; try { drafts = JSON.parse(lsGet('drafts') || '{}') || {}; } catch (e) {}
   const taKey = ta => ta.dataset.draft || ta.id;
   // Each comment or question draft remembers where its composer was, so the queue can reopen it after Esc.
@@ -621,11 +631,15 @@
           const item = document.createElement('div'); item.className = 'ghc';
           item.innerHTML = '<div class="ghwho"><b>' + esc(c.author) + '</b> <span>' + esc(c.kind) + ' · ' + esc((c.at || '').slice(0, 10)) + '</span> <a href="' + esc(c.url) + '" target="_blank" rel="noopener">open</a></div><div class="ghbody">' + cleanHTML(c.html) + '</div>';
           Object.values(comments).filter(x => x.replyToConv === c.url).forEach(x => item.appendChild(card(x)));
+          aboutChats(c.url, item).forEach(x => item.appendChild(x));
+          if (openAsk && openAsk.about === c.url) pc.open = true;
           if (openComposer && openComposer.replyToConv === c.url) item.appendChild(composer(openComposer));
           else {
             const b = document.createElement('button'); b.className = 'btn small'; b.textContent = 'Reply (queue)';
             b.onclick = () => { openComposer = { commit: COMMITS[0].sha, commitIdx: 0, replyToConv: c.url, convAuthor: c.author }; editing = null; renderAll(); };
-            const row = document.createElement('div'); row.className = 'actions'; row.appendChild(b); item.appendChild(row);
+            const row = document.createElement('div'); row.className = 'actions'; row.appendChild(b);
+            row.appendChild(draftReplyBtn({ commit: COMMITS[0].sha, commitIdx: 0, about: c.url, aboutText: c.author + ': ' + cleanTextOf(c.html), replyToConv: c.url, convAuthor: c.author }));
+            item.appendChild(row);
           }
           pc.appendChild(item);
         });
@@ -1405,6 +1419,12 @@
     if (b) b.click(); else toast('Nothing to resolve here');
     return true;
   }
+  // a asks Claude to draft a reply to the selected reviewer thread; on the PR conversation, to its latest comment.
+  function draftReplyKey() {
+    const cur = current_();
+    if (!lastCmt && cur && cur.id === 'prconv') { const bs = cur.querySelectorAll('[data-act="draftreply"]'); if (bs.length) { bs[bs.length - 1].click(); return; } }
+    cardAction('[data-act="draftreply"]', 'No reviewer thread or PR conversation comment here');
+  }
   function cardAction(sel, none) {
     const cur = current_(); let scope = [];
     if (lastCmt) scope = [lastCmt];
@@ -1464,7 +1484,7 @@
       ']': () => go(current + 1), '[': () => go(current - 1), ArrowRight: () => sideKey('RIGHT') || toQueue(), ArrowLeft: () => sideKey('LEFT') || toDiff(),
       j: () => moveCursor(-1, true), ArrowUp: () => region === 'queue' ? moveQ(-1) : arrowMove(-1), l: () => moveCursor(1, true), ArrowDown: () => region === 'queue' ? moveQ(1) : arrowMove(1),
       PageUp: () => pageCursor(-1), PageDown: () => pageCursor(1),
-      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), v: () => toggleViewed(), t: () => showKeys(document.getElementById('keys-panel').hidden), f: () => toggleFeedback(), d: () => ghResolveKey() || cardAction(['[data-act="dismiss"], .chat [data-act="restore"]', '[data-act="reject"], .card > .actions [data-act="restore"]', '[data-act="hidedisc"], [data-act="showdisc"]', '.change [data-act="decline"], .change [data-act="restorechg"]', '.ghthread > .actions [data-act="ghresolve"], .ghthread > .actions [data-act="ghunresolve"]'], 'Nothing to dismiss here'), q: () => cardAction(['[data-act="approve"]', '.change [data-act="accept"]'], 'No proposed comment or change here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), c: () => toggleTop(), Enter: () => enterCursor()
+      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), v: () => toggleViewed(), t: () => showKeys(document.getElementById('keys-panel').hidden), f: () => toggleFeedback(), d: () => ghResolveKey() || cardAction(['[data-act="dismiss"], .chat [data-act="restore"]', '[data-act="reject"], .card > .actions [data-act="restore"]', '[data-act="hidedisc"], [data-act="showdisc"]', '.change [data-act="decline"], .change [data-act="restorechg"]', '.ghthread > .actions [data-act="ghresolve"], .ghthread > .actions [data-act="ghunresolve"]'], 'Nothing to dismiss here'), q: () => cardAction(['[data-act="approve"]', '.change [data-act="accept"]'], 'No proposed comment or change here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), a: () => draftReplyKey(), c: () => toggleTop(), Enter: () => enterCursor()
     };
     const act = keys[e.key] || (e.key.length === 1 ? keys[e.key.toLowerCase()] : null);
     // Letter keys bring the cursor back to the diff, except v on the commit stepper, which marks that commit viewed,
