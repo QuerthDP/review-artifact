@@ -42,7 +42,7 @@
     if (openAsk && openAsk.about === t.id) d.open = true;
     if (openComposer && openComposer.replyTo === t.id) d.appendChild(composer(openComposer));
     else {
-      const b = document.createElement('button'); b.className = 'btn small'; b.textContent = 'Reply (queue to your GitHub draft)';
+      const b = document.createElement('button'); b.className = 'btn small'; b.dataset.act = 'ghreply'; b.textContent = 'Reply (queue to your GitHub draft)';
       b.onclick = () => { openComposer = { commit: t.commit, commitIdx: current, path: t.path, line: t.line, side: t.side, replyTo: t.id }; editing = null; renderAll(); };
       const row = document.createElement('div'); row.className = 'actions'; row.appendChild(b);
       const last = t.comments[t.comments.length - 1];
@@ -635,7 +635,7 @@
           if (openAsk && openAsk.about === c.url) pc.open = true;
           if (openComposer && openComposer.replyToConv === c.url) item.appendChild(composer(openComposer));
           else {
-            const b = document.createElement('button'); b.className = 'btn small'; b.textContent = 'Reply (queue)';
+            const b = document.createElement('button'); b.className = 'btn small'; b.dataset.act = 'convreply'; b.textContent = 'Reply (queue)';
             b.onclick = () => { openComposer = { commit: COMMITS[0].sha, commitIdx: 0, replyToConv: c.url, convAuthor: c.author }; editing = null; renderAll(); };
             const row = document.createElement('div'); row.className = 'actions'; row.appendChild(b);
             row.appendChild(draftReplyBtn({ commit: COMMITS[0].sha, commitIdx: 0, about: c.url, aboutText: c.author + ': ' + cleanTextOf(c.html), replyToConv: c.url, convAuthor: c.author }));
@@ -1297,6 +1297,7 @@
     return Object.assign(anchor, { line: hi, startLine: lo });
   }
   function lineAction(sel) {
+    if (sel === '.addbtn' && replyKey()) return;
     // i on a selected comment talks to Claude inside it: a Claude comment gets its revision box, a conversation its
     // follow-up, and your own comments and reviewers' threads a conversation drawn inside them.
     if (sel === '.askbtn') {
@@ -1418,6 +1419,23 @@
     const b = el.querySelector(':scope > .actions [data-act="ghresolve"], :scope > .actions [data-act="ghunresolve"]');
     if (b) b.click(); else toast('Nothing to resolve here');
     return true;
+  }
+  // k on a reviewer thread, or on a comment inside one, opens that thread's own reply instead of a new line
+  // comment; on the PR conversation it replies to its latest comment.
+  function replyKey() {
+    const here = current_(); let el = lastCmt || here;
+    el = el && el.closest ? el.closest('.ghthread') : null;
+    if (!el) {
+      if (lastCmt || !here || here.id !== 'prconv') return false;
+      const bs = here.querySelectorAll('[data-act="convreply"]'); if (bs.length) { bs[bs.length - 1].click(); return true; }
+      const ta = here.querySelector('.composer textarea'); if (ta) { ta.scrollIntoView({ block: 'center' }); ta.focus(); return true; }
+      return false;
+    }
+    // A re-render replaces the card; act on the one now on the page.
+    if (el.id) el = document.getElementById(el.id) || el;
+    const ta = el.querySelector(':scope > .composer textarea'); if (ta) { el.open = true; ta.scrollIntoView({ block: 'center' }); ta.focus(); return true; }
+    const b = el.querySelector(':scope > .actions [data-act="ghreply"]'); if (b) { b.click(); return true; }
+    return false;
   }
   // a asks Claude to draft a reply to the selected reviewer thread; on the PR conversation, to its latest comment.
   function draftReplyKey() {
