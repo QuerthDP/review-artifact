@@ -24,7 +24,7 @@ Review commit by commit (correctness first; verify claims by running code where 
 
 On the user's own PR (`mine`) Claude never seeds comments meant for GitHub: every finding is a proposed change the user accepts or declines. Give each line finding `old` (the exact RIGHT-side lines, starting at the one holding `snippet`) and `new` (the fix; `[]` deletes), and each commit-level one `op: "drop"` or `op: "reword"` with the full new `message`; a finding with no concrete fix is left out. Run `seeds.py` with `--mine`: it writes `changes/claude_chg_<n>` docs (`status: proposed`, `reason` = the body).
 
-Also import the user's existing pending GitHub review comments (if any: the PENDING review in `gh api repos/<repo>/pulls/<N>/reviews`, its comments from `.../reviews/<id>/comments`) as docs with `author: "user", source: "github", status: "queued", githubCommentId`, so the page shows them as "in your GitHub draft". Such comments (like any made in GitHub's UI) lock the draft: later page comments are added at submit instead (§5); say so to the user.
+Also import the user's existing pending GitHub review comments (if any: the PENDING review in `gh api repos/<repo>/pulls/<N>/reviews`, its comments from `.../reviews/<id>/comments`) as docs with `author: "user", source: "github", status: "queued", githubCommentId`, so the page shows them as "in your GitHub draft". Every sync after that imports new ones the same way (doc id `gh_<comment id>`, a reply placed under its reviewer thread, a line comment on the commit that introduced the line) and drops the doc of one deleted from the draft on GitHub. Such comments (like any made in GitHub's UI) lock the draft: later page comments are added at submit instead (§5); say so to the user.
 
 ## 3. Data model (db collections)
 

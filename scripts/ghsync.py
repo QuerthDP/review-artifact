@@ -21,7 +21,9 @@ into a pending review, nor read back a pending comment's line range. So:
    from the docs; anything made or edited in GitHub's UI makes the draft "locked" and nothing in it is ever deleted;
  * what cannot go into the draft now (replies, file/commit-level, lines outside the diff, anything while locked) is
    marked deferred with a ready-to-post plan; the page adds it at submit time through its GitHub connector, or
-   --submit posts it right after submitting. A deferred doc stays queued until it is really posted."""
+   --submit posts it right after submitting. A deferred doc stays queued until it is really posted.
+Draft comments made in GitHub's UI that no doc knows are imported as new docs (source: github, op set), so the page shows
+them; such a doc is dropped once its comment leaves the draft unpublished."""
 import json, os, re, subprocess, sys, time
 argv = sys.argv[1:]
 CFG_PATH, DOCS_DIR = argv[0], argv[1]; CFG = json.load(open(CFG_PATH))
@@ -34,9 +36,11 @@ try: BADGES = json.load(open(os.path.expanduser('~/.config/review-artifact/badge
 except FileNotFoundError: BADGES = {}
 CLAUDE, HUMAN = BADGES.get('claude', ''), BADGES.get('human', '')
 MAIN = {c['sha'][:7]: max(c['files'], key=lambda f: f['add'] + f['del'])['path'] for c in json.load(open(CFG['diff'])) if c['files']}
-ROOTS = {}  # review thread node id -> numeric id of its first comment (needed to reply over REST)
+ROOTS, THREADS = {}, {}  # review thread node id -> numeric id of its first comment (needed to reply over REST), and back
 if CFG.get('gh') and os.path.exists(CFG['gh']):
     ROOTS = {t['id']: t['rootCommentId'] for t in json.load(open(CFG['gh']))['threads'] if t.get('rootCommentId')}
+    THREADS = {t['rootCommentId']: t for t in json.load(open(CFG['gh']))['threads'] if t.get('rootCommentId')}
+SERIES = [c['sha'] for c in json.load(open(CFG['diff']))]
 def log(*a): print(*a, file=sys.stderr)
 def git(*a): return subprocess.run(['git', '-C', REPO, *a], capture_output=True, text=True, check=True).stdout
 
@@ -161,6 +165,28 @@ def set_deferred(doc_id, a, why=None):
     clear_gh(doc_id); upd(doc_id, deferred=why or a['deferred'], githubPlan={k: v for k, v in a.items() if k != 'deferred'})
     if a.get('quote'): upd(doc_id, githubQuote=a['quote'])
 
+def anchor_of_gh(c):
+    """Where a draft comment made in GitHub's UI sits on the page: under its reviewer thread for a reply, else on the
+    commit that introduced its line (the last line of its diff hunk)."""
+    t = THREADS.get(c.get('in_reply_to_id'))
+    if t: return {'commit': t['commit'], 'path': t['path'], 'line': t.get('line'), 'side': t.get('side') or 'RIGHT',
+                  'replyTo': t['id'], 'replyToCommentId': c['in_reply_to_id']}
+    hunk = [l for l in (c.get('diff_hunk') or '').split('\n') if not l.startswith('\\')]
+    m = re.match(r'@@ -(\d+)(?:,\d+)? \+(\d+)', hunk[0]) if hunk else None
+    if not m or len(hunk) < 2 or c.get('subject_type') == 'file': return {'commit': SERIES[-1], 'path': c['path'], 'line': None, 'side': 'RIGHT'}
+    old, new = int(m[1]) - 1, int(m[2]) - 1
+    for l in hunk[1:]:
+        if not l.startswith('+'): old += 1
+        if not l.startswith('-'): new += 1
+    if hunk[-1].startswith('-'): return {'commit': SERIES[0], 'path': c['path'], 'line': old, 'side': 'LEFT'}
+    sha, line = SERIES[-1], new
+    try:
+        b = git('blame', '--porcelain', '-L', f'{new},{new}', c.get('commit_id') or HEAD, '--', c['path']).split()
+        if b[0] in SERIES: sha, line = b[0], int(b[1])
+    except (subprocess.CalledProcessError, IndexError, ValueError): pass
+    return {'commit': sha, 'path': c['path'], 'line': line, 'side': 'RIGHT'}
+DROP = set()  # docs of GitHub-UI comments that left the draft without being published (deleted there)
+
 def reconcile():
     # Docs whose comment is already published (review submitted from GitHub's UI, or posted before) are done:
     # mark them posted so they are never re-added to a new draft.
@@ -179,6 +205,21 @@ def reconcile():
         if not d.get('inDraft') or d.get('githubCommentId') or d.get('githubBody') is None: continue
         cid = next((k for k, x in live.items() if k not in claimed and x['path'] == d.get('githubPath') and norm(x['body']) == norm(d['githubBody'])), None)
         if cid: d['githubCommentId'] = cid; claimed.add(cid); upd(i, githubCommentId=cid); log('claimed', cid, 'for', i)
+    # Comments made in GitHub's UI (in this draft, but no doc knows them) are imported so the page shows them; a doc of
+    # one that left the draft is posted if GitHub published it, else (deleted there) dropped.
+    known = {(d.get('githubPath') or d.get('path'), norm(d.get('githubBody'))) for d in DOCS.values() if d.get('githubBody')}
+    for cid, x in live.items():
+        if cid in claimed or cid in REMOVE or (x['path'], norm(x['body'])) in known: continue
+        i = f'gh_{cid}'; claimed.add(cid)
+        upd(i, author='user', source='github', status='queued', inDraft=True, githubCommentId=cid, githubPath=x['path'],
+            githubBody=x['body'], body=x['body'], createdAt=x.get('created_at'), **anchor_of_gh(x))
+        log('imported', cid, '(made in GitHub UI)')
+    gone = [i for i, d in DOCS.items() if d.get('source') == 'github' and d.get('status') == 'queued' and d.get('githubCommentId') and d['githubCommentId'] not in live]
+    if gone:
+        published = {c['id'] for c in api('GET', f'pulls/{PR}/comments?per_page=100', paginate=True)}  # again: a submit may have raced
+        for i in gone:
+            if DOCS[i]['githubCommentId'] in published: upd(i, status='posted', postedAt=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), inDraft=DEL)
+            else: DROP.add(i); log('dropped', i, '(deleted from the draft on GitHub)')
     by_cid ={d['githubCommentId']: i for i, d in DOCS.items() if d.get('githubCommentId') in live}
     # A draft comment is recreatable only if this script made it (recorded anchor) and its text on GitHub is untouched.
     def recreatable(cid):
@@ -293,14 +334,14 @@ finally:
     for i, d in DOCS.items():
         if d.get('syncPending'): upd(i, syncPending=DEL)
     out = []
-    for i in set(writes) | {i for i, d in DOCS.items() if d.get('deleted')}:
+    for i in set(writes) | DROP | {i for i, d in DOCS.items() if d.get('deleted')}:
         cur = ORIG.get(i, {})  # drop no-op writes (same value, or deleting an absent field)
         data = {k: v for k, v in writes.get(i, {}).items() if not (v == DEL and k not in cur) and not (v != DEL and cur.get(k) == v)}
         after = {**cur, **data}; after = {k: v for k, v in after.items() if v != DEL}
         # A tombstone (deleted on the page while on GitHub) goes once nothing of it is left on GitHub.
-        gone = cur.get('deleted') and not any(after.get(k) for k in ('inDraft', 'githubCommentId', 'deferred', 'githubConflict'))
+        gone = i in DROP or cur.get('deleted') and not any(after.get(k) for k in ('inDraft', 'githubCommentId', 'deferred', 'githubConflict'))
         if not data and not gone: continue
-        w = {'op': 'delete', 'collection': 'comments', 'doc_id': i} if gone else {'op': 'update', 'collection': 'comments', 'doc_id': i, 'data': data}
+        w = {'op': 'delete', 'collection': 'comments', 'doc_id': i} if gone else {'op': 'update' if i in DOCS else 'set', 'collection': 'comments', 'doc_id': i, 'data': data}
         if DOCS.get(i, {}).get('_version'): w['if_version'] = DOCS[i]['_version']
         out.append(w)
     print(json.dumps(out))
