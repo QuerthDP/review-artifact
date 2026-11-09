@@ -18,7 +18,7 @@ Files at the repository root `$R` (the directory holding `app/`; `~/.claude/skil
 
 ## 2. Seed Claude's review
 
-Review commit by commit (correctness first; verify claims by running code where possible). Write findings to `$S/findings.json` — `[{"commit": "<short>", "path": "<file>"|null, "snippet": "<exact text on the line>"|null, "side": "RIGHT", "body": "..."}]` (path null = commit-level; snippet null = file-level). Bodies: **2–3 sentences, concise**, problem then suggestion; no headings; never cite line numbers (the comment sits on its line; name the code instead). Revisions keep these rules.
+Review commit by commit (correctness first; verify claims by running code where possible). Write findings to `$S/findings.json` — `[{"commit": "<short>", "path": "<file>"|null, "snippet": "<exact text on the line>"|null, "side": "RIGHT", "body": "..."}]` (path null = commit-level; snippet null = file-level). Bodies: **at most two short sentences, about 30 words**: the problem in plain words, then one concrete fix. Cut background the reader can see in the diff, how you verified it, hedging ("might", "consider whether"), alternatives lists and restating the code. `Nit:` for style only. No headings; never cite line numbers (the comment sits on its line; name the code instead). Before seeding, reread each body and cut every word that does not change its meaning. Revisions, replies and suggestion texts keep these rules.
 
 `python3 -I $R/scripts/seeds.py $S/diff.json $S/findings.json $S/writes.json`, then one `ArtifactData` `batch` with those writes. Never hardcode comments into the HTML.
 
