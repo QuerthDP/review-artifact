@@ -25,6 +25,12 @@
     return doc.body.firstChild.innerHTML;
   }
   const isReply = x => !!(x.replyTo || x.replyToConv);
+  // The PR overview (description and main-thread conversation) is its own stop before the first commit: current = -1.
+  // Replies to the conversation and Claude chats about it live there, though their docs name the first commit.
+  const convUrls = () => new Set((GH.conversation || []).map(c => c.url));
+  const onOv = x => !!(x && (x.replyToConv || (x.about && convUrls().has(x.about))));
+  const pageOf = x => onOv(x) ? -1 : COMMITS.findIndex(c => c.sha === x.commit);
+  const pageLabel = ci => ci < 0 ? 'PR' : String(ci + 1);
   const ghOpen = new Set(), ghClosed = new Set(); // per-view expand state of reviewer threads, kept across re-renders
   // Outside the local app a reviewer thread can be marked resolved on this page only (d or its button; localStorage).
   const ghLocalRes = t => lsGet('ghres:' + t.id) === '1';
@@ -358,22 +364,33 @@
   function isCommitViewed(c) { return !!(c.files && c.files.length) && c.files.every(f => isFileViewed(c, f.path)); }
   function renderStepper() {
     const el = document.getElementById('stepper'); el.innerHTML = '';
+    {
+      const oc = Object.values(comments).filter(onOv), ot = Object.values(threads).filter(t => onOv(t) && visibleThread(t));
+      const p = oc.filter(x => x.status === 'proposed').length, q = oc.filter(x => x.status === 'queued').length;
+      const wait = ot.filter(t => t.status !== 'answered').length, conv = ot.length - wait, nconv = (GH.conversation || []).length;
+      const kinds = [[p, 'proposed', 'proposed reply', 'proposed replies'], [q, 'queued', 'queued reply', 'queued replies'], [wait, 'wait', 'question waiting for Claude', 'questions waiting for Claude'], [conv, 'conv', 'conversation with Claude', 'conversations with Claude']];
+      const dots = kinds.map(k => ('<span class="dot ' + k[1] + '"></span>').repeat(Math.min(k[0], 8))).join('');
+      const tip = ['PR description and conversation (' + nconv + ' comment' + (nconv === 1 ? '' : 's') + ')'].concat(kinds.filter(k => k[0]).map(k => k[0] + ' ' + (k[0] > 1 ? k[3] : k[2])));
+      const b = document.createElement('button'); b.className = 'step ovstep' + (current === -1 ? ' active' : ''); b.dataset.ci = '-1'; b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', current === -1);
+      b.innerHTML = '<span class="n">PR · overview</span><span class="s">Description' + (nconv ? ' · ' + nconv + ' comment' + (nconv === 1 ? '' : 's') : '') + '</span><span class="dots">' + dots + '</span>';
+      b.title = tip.join(' · '); b.onclick = () => go(-1); el.appendChild(b);
+    }
     COMMITS.forEach((c, i) => {
-      const cs = byCommit(c.sha);
+      const cs = byCommit(c.sha).filter(x => !onOv(x));
       const p = cs.filter(x => x.status === 'proposed').length, q = cs.filter(x => x.status === 'queued').length;
       // Besides Claude's comments, the dots show what still needs the viewer on this commit: changes to decide (amber square),
       // conversations with Claude (teal; an outline while Claude has not answered) and open reviewer threads (blue). Changes
       // already decided are not counted. The tooltip spells the counts out.
       const chs = Object.values(changes).filter(x => x.commit === c.sha);
       const decide = chs.filter(x => x.status === 'proposed' || x.status === 'failed').length;
-      const ths = Object.values(threads).filter(t => t.commit === c.sha && t.kind !== 'feedback' && !t.dismissed);
+      const ths = Object.values(threads).filter(t => t.commit === c.sha && t.kind !== 'feedback' && !t.dismissed && !onOv(t));
       const wait = ths.filter(t => t.status !== 'answered').length, conv = ths.length - wait;
       const gho = GH.threads.filter(t => t.commit === c.sha && !ghRes(t)).length;
       const kinds = [[p, 'proposed', 'proposed comment', 'proposed comments'], [q, 'queued', 'queued comment', 'queued comments'], [decide, 'chg', 'change to decide', 'changes to decide'], [wait, 'wait', 'question waiting for Claude', 'questions waiting for Claude'], [conv, 'conv', 'conversation with Claude', 'conversations with Claude'], [gho, 'gh', 'open reviewer thread', 'open reviewer threads']];
       const dots = kinds.map(k => ('<span class="dot ' + k[1] + '"></span>').repeat(Math.min(k[0], 8))).join('');
       const tip = kinds.filter(k => k[0]).map(k => k[0] + ' ' + (k[0] > 1 ? k[3] : k[2]));
       const viewed = isCommitViewed(c); if (viewed) tip.unshift('all files viewed');
-      const b = document.createElement('button'); b.className = 'step' + (i === current ? ' active' : '') + (viewed ? ' viewed' : ''); b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', i === current);
+      const b = document.createElement('button'); b.className = 'step' + (i === current ? ' active' : '') + (viewed ? ' viewed' : ''); b.dataset.ci = String(i); b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', i === current);
       b.innerHTML = '<span class="n">' + (i + 1) + '/' + COMMITS.length + ' · ' + esc(c.short) + (isDropped(c.sha) ? ' · <span class="dropmark">dropped</span>' : '') + '</span>' + (viewed ? '<span class="viewmark" aria-hidden="true">✓</span>' : '') + '<span class="s">' + esc((Object.values(changes).find(x => x.commit === c.sha && x.op === 'reword' && x.status === 'accepted' && x.message) || {}).message ? String(Object.values(changes).find(x => x.commit === c.sha && x.op === 'reword' && x.status === 'accepted' && x.message).message).split('\n')[0] : c.subject) + '</span><span class="dots">' + dots + '</span>';
       if (tip.length) b.title = tip.join(' · ');
       b.onclick = () => go(i); el.appendChild(b);
@@ -381,7 +398,7 @@
     const all = Object.values(comments);
     const n = s => all.filter(x => x.status === s).length;
     document.getElementById('counts').innerHTML = '<span class="pill proposed">' + n('proposed') + ' proposed</span><span class="pill queued">' + n('queued') + ' queued</span>' + (n('revise') ? '<span class="pill revise">' + n('revise') + ' with Claude</span>' : '') + (n('posted') ? '<span class="pill posted">' + n('posted') + ' posted</span>' : '') + (function () { const k = Object.values(changes).filter(x => x.status === 'proposed' || x.status === 'failed').length; return k ? '<span class="pill proposed">' + k + ' change' + (k > 1 ? 's' : '') + ' to decide</span>' : ''; })();
-    document.getElementById('prev').disabled = current === 0;
+    document.getElementById('prev').disabled = current === -1;
     document.getElementById('next').disabled = current === COMMITS.length - 1;
   }
 
@@ -458,8 +475,9 @@
   }
   const changesAt = (sha, path, refs) => Object.values(changes).filter(x => x.status !== 'landed' && x.commit === sha && x.path === path && x.line && (!refs || refs.some(r => x.line === r.line && (x.side || 'RIGHT') === r.side)));
   // Jump to a card or row by id, on its own commit, unfolding its file.
+  // A sha of null is the PR overview.
   function jumpTo(sha, id, fallbacks) {
-    const ci = COMMITS.findIndex(c => c.sha === sha); if (ci >= 0 && ci !== current) go(ci);
+    const ci = sha === null ? -1 : COMMITS.findIndex(c => c.sha === sha); if (ci >= -1 && ci !== current) go(ci);
     setTimeout(() => { let el = document.getElementById(id); if (!el && fallbacks) { for (const f of fallbacks) if ((el = document.getElementById(f))) { toast('Line not in this diff; showing its file'); break; } } if (!el) { toast('Not shown in this view'); return; } if (el.tagName === 'DETAILS') el.open = true; const sec = el.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; const tg = sec.querySelector('[data-toggle]'); if (tg) tg.textContent = '▾'; } setCursor(el, false); el.scrollIntoView({ block: 'center' }); flashRow(el); }, 0);
   }
   // A change with no path acts on the whole commit: op "drop" removes it, op "reword" gives it a new message.
@@ -544,7 +562,7 @@
       else if (act === 'decline') writeChange(ch.id, { status: 'declined', decidedAt: at }).then(ok => { if (ok) toast('Declined'); });
       else if (act === 'restorechg') writeChange(ch.id, { status: 'proposed', decidedAt: null }).then(ok => { if (ok) toast('Back to proposed'); });
       else if (act === 'expand') { if (chgOpen.has(ch.id)) chgOpen.delete(ch.id); else chgOpen.add(ch.id); renderFiles(); }
-      else if (act === 'gocomment') { const c = comments[ch.commentId]; if (c) jumpTo(c.commit, 'cds-' + c.id); else toast('The suggestion is not loaded yet'); }
+      else if (act === 'gocomment') { const c = comments[ch.commentId]; if (c) jumpTo(onOv(c) ? null : c.commit, 'cds-' + c.id); else toast('The suggestion is not loaded yet'); }
     });
     return d;
   }
@@ -568,8 +586,47 @@
     return d;
   }
 
+  // The PR overview: the description, then each main-thread conversation item (issue comments, review bodies) as its
+  // own thread card with its queued replies, Claude chats and reply buttons. No files.
+  function renderOverview(el) {
+    const desc = GH.description, conv = GH.conversation || [], c0 = COMMITS[0];
+    el.innerHTML = '<h2 id="overview">Pull request overview</h2><div class="meta"><a class="sha" href="' + REPO + '/pull/' + PR_NUMBER + '" target="_blank" rel="noopener">#' + esc(String(PR_NUMBER)) + '</a><span>' + COMMITS.length + ' commit' + (COMMITS.length === 1 ? '' : 's') + '</span><span>' + conv.length + ' conversation comment' + (conv.length === 1 ? '' : 's') + '</span></div>';
+    const ov = document.createElement('div'); ov.className = 'general prov'; ov.id = 'prov';
+    ov.innerHTML = '<h3>Description</h3>';
+    const dd = document.createElement('div'); dd.className = 'ghthread prdesc'; dd.id = 'prdesc';
+    if (desc) dd.innerHTML = '<div class="card-head"><b>' + esc(desc.author) + '</b><span>description · ' + esc((desc.at || '').slice(0, 10)) + '</span><a href="' + esc(desc.url) + '" target="_blank" rel="noopener">open</a></div><div class="ghbody">' + (desc.html ? cleanHTML(desc.html) : '<span class="empty">No description provided.</span>') + '</div>';
+    else dd.innerHTML = '<div class="ghbody"><span class="empty">No description' + (conv.length ? '' : ' and no conversation') + '.</span></div>';
+    ov.appendChild(dd);
+    if (conv.length) {
+      const h = document.createElement('h3'); h.textContent = 'Conversation · replies are queued and posted together with "Post queued conversation replies"'; ov.appendChild(h);
+    }
+    conv.forEach((c, i) => {
+      const key = 'conv:' + c.url, m = /(\d+)\D*$/.exec(c.url || '');
+      const d = document.createElement('details'); d.className = 'ghthread prconv'; d.id = 'conv-' + (m ? m[1] : i); d.dataset.url = c.url;
+      d.open = !ghClosed.has(key) || !!(openComposer && openComposer.replyToConv === c.url) || !!(openAsk && openAsk.about === c.url);
+      d.addEventListener('toggle', () => { if (d.open) ghClosed.delete(key); else ghClosed.add(key); });
+      d.innerHTML = '<summary class="card-head"><b>' + esc(c.author) + '</b><span>' + esc(c.kind) + ' · ' + esc((c.at || '').slice(0, 10)) + '</span><a href="' + esc(c.url) + '" target="_blank" rel="noopener">open on GitHub</a></summary><div class="ghc"><div class="ghbody">' + cleanHTML(c.html) + '</div></div>';
+      Object.values(comments).filter(x => x.replyToConv === c.url).forEach(x => d.appendChild(card(x)));
+      aboutChats(c.url, d).forEach(x => d.appendChild(x));
+      if (openComposer && openComposer.replyToConv === c.url) d.appendChild(composer(openComposer));
+      else {
+        const b = document.createElement('button'); b.className = 'btn small'; b.dataset.act = 'convreply'; b.textContent = 'Reply (queue)';
+        b.onclick = () => { openComposer = { commit: c0.sha, commitIdx: 0, replyToConv: c.url, convAuthor: c.author }; editing = null; renderAll(); };
+        const row = document.createElement('div'); row.className = 'actions'; row.appendChild(b);
+        row.appendChild(draftReplyBtn({ commit: c0.sha, commitIdx: 0, about: c.url, aboutText: c.author + ': ' + cleanTextOf(c.html), replyToConv: c.url, convAuthor: c.author }));
+        d.appendChild(row);
+      }
+      ov.appendChild(d);
+    });
+    // Each card is a keyboard stop.
+    Array.from(ov.children).filter(ch => ch.tagName !== 'H3').forEach((ch, i) => { ch.classList.add('gstop'); if (!ch.id) ch.id = 'prstop-' + i; });
+    el.appendChild(ov);
+  }
+
   function renderCommit() {
-    const c = COMMITS[current]; const el = document.getElementById('commit');
+    const el = document.getElementById('commit');
+    if (current < 0) { renderOverview(el); return; }
+    const c = COMMITS[current];
     const add = c.files.reduce((s, f) => s + f.add, 0), del = c.files.reduce((s, f) => s + f.del, 0);
     el.innerHTML = '<h2 id="commit' + (current + 1) + '-' + esc(c.short) + '">' + esc(c.subject) + '</h2><div class="meta"><a class="sha" href="' + REPO + '/pull/' + PR_NUMBER + '/commits/' + c.sha + '" target="_blank" rel="noopener">' + esc(c.short) + '</a><span>' + c.files.length + ' files</span><span class="stat"><span class="a">+' + add + '</span> <span class="d">−' + del + '</span></span></div>' + (c.body ? '<p class="msg">' + esc(c.body) + '</p>' : '') + '<ul class="filelist">' + c.files.map(f => '<li><a href="#' + fileId(current, f.path) + '" data-jump="' + esc(fileId(current, f.path)) + '">' + esc(f.path) + '</a> <span class="stat"><span class="a">+' + f.add + '</span> <span class="d">−' + f.del + '</span></span></li>').join('') + '</ul>';
     el.querySelectorAll('a[data-jump]').forEach(a => a.onclick = e => { e.preventDefault(); const t = document.getElementById(a.getAttribute('data-jump')); if (t) { t.classList.remove('collapsed'); const tg = t.querySelector('[data-toggle]'); if (tg) tg.textContent = '▾'; t.scrollIntoView({ block: 'start' }); } });
@@ -612,44 +669,6 @@
       const m = document.createElement('button'); m.className = 'btn small'; m.style.color = 'var(--proposed)'; m.style.borderColor = 'var(--proposed)'; m.textContent = '✎ Ask Claude to change this commit'; m.title = 'Reword its message, drop it, or rework it as a whole (m)'; m.dataset.m = '1'; m.onclick = () => askAbout({ commit: c.sha, commitIdx: current, kind: 'modify' }); row.appendChild(m);
       g.appendChild(row);
     }
-    // Before the first commit: the PR description with the whole PR conversation under it, as on the PR's own page.
-    if (current === 0) {
-      const desc = GH.description, conv = GH.conversation || [];
-      const ov = document.createElement('div'); ov.className = 'general prov'; ov.id = 'prov';
-      ov.innerHTML = '<h3>Pull request description and conversation</h3>';
-      if (desc) {
-        const dd = document.createElement('div'); dd.className = 'ghthread prdesc'; dd.id = 'prdesc';
-        dd.innerHTML = '<div class="card-head"><b>' + esc(desc.author) + '</b><span>description · ' + esc((desc.at || '').slice(0, 10)) + '</span><a href="' + esc(desc.url) + '" target="_blank" rel="noopener">open</a></div><div class="ghbody">' + (desc.html ? cleanHTML(desc.html) : '<span class="empty">No description provided.</span>') + '</div>';
-        ov.appendChild(dd);
-      }
-      if (conv.length) {
-        const pc = document.createElement('details'); pc.className = 'ghthread'; pc.id = 'prconv';
-        pc.open = !ghClosed.has('pr-conv') || !!(openComposer && openComposer.replyToConv);
-        pc.addEventListener('toggle', () => { if (pc.open) ghClosed.delete('pr-conv'); else ghClosed.add('pr-conv'); });
-        pc.innerHTML = '<summary class="card-head"><b>PR conversation</b><span>' + conv.length + ' items · replies are queued and posted together when you click "Post queued conversation replies"</span></summary>';
-        conv.forEach(c => {
-          const item = document.createElement('div'); item.className = 'ghc';
-          item.innerHTML = '<div class="ghwho"><b>' + esc(c.author) + '</b> <span>' + esc(c.kind) + ' · ' + esc((c.at || '').slice(0, 10)) + '</span> <a href="' + esc(c.url) + '" target="_blank" rel="noopener">open</a></div><div class="ghbody">' + cleanHTML(c.html) + '</div>';
-          Object.values(comments).filter(x => x.replyToConv === c.url).forEach(x => item.appendChild(card(x)));
-          aboutChats(c.url, item).forEach(x => item.appendChild(x));
-          if (openAsk && openAsk.about === c.url) pc.open = true;
-          if (openComposer && openComposer.replyToConv === c.url) item.appendChild(composer(openComposer));
-          else {
-            const b = document.createElement('button'); b.className = 'btn small'; b.dataset.act = 'convreply'; b.textContent = 'Reply (queue)';
-            b.onclick = () => { openComposer = { commit: COMMITS[0].sha, commitIdx: 0, replyToConv: c.url, convAuthor: c.author }; editing = null; renderAll(); };
-            const row = document.createElement('div'); row.className = 'actions'; row.appendChild(b);
-            row.appendChild(draftReplyBtn({ commit: COMMITS[0].sha, commitIdx: 0, about: c.url, aboutText: c.author + ': ' + cleanTextOf(c.html), replyToConv: c.url, convAuthor: c.author }));
-            item.appendChild(row);
-          }
-          pc.appendChild(item);
-        });
-        ov.appendChild(pc);
-      }
-      if (ov.children.length > 1) {
-        Array.from(ov.children).filter(ch => ch.tagName !== 'H3').forEach((ch, i) => { ch.classList.add('gstop'); if (!ch.id) ch.id = 'prstop-' + i; });
-        el.insertBefore(ov, h2);
-      }
-    }
     // Every item of the commit-level section is a keyboard stop, before the files.
     Array.from(g.children).filter(ch => ch.tagName !== 'H3').forEach((ch, i) => { ch.classList.add('gstop'); if (!ch.id) ch.id = 'gstop-' + current + '-' + i; });
     el.appendChild(g);
@@ -657,6 +676,7 @@
 
   function renderFiles() {
     const c = COMMITS[current]; const root = document.getElementById('files'); root.innerHTML = '';
+    if (!c) return;
     const col = document.createElement('div'); col.className = 'col';
     c.files.forEach(f => {
       const fid = fileId(current, f.path);
@@ -853,10 +873,10 @@
       const g = document.createElement('div'); g.className = 'qgroup';
       g.innerHTML = '<h3><span class="pill proposed">' + unsent.length + '</span>Unsent drafts</h3>';
       unsent.forEach(k => {
-        const a = draftAt[k], ci = COMMITS.findIndex(c => c.sha === a.commit); if (ci < 0) return;
+        const a = draftAt[k], ci = pageOf(a); if (ci < -1 || (ci < 0 && !onOv(a))) return;
         const b = document.createElement('button'); b.className = 'qitem';
-        b.innerHTML = '<div class="where">' + (ci + 1) + ' · ' + esc(a.path ? a.path + lineLabel(a) : 'commit-level') + ' · ' + (k[0] === 'c' ? 'comment' : a.kind === 'modify' ? 'change request' : 'question') + '</div><div class="snip">' + esc(drafts[k].split('\n')[0]) + '</div>';
-        b.onclick = () => { go(ci); const an = Object.assign({}, a, { commitIdx: ci }); if (k[0] === 'c') { openComposer = an; openAsk = null; } else { openAsk = an; openComposer = null; } renderAll(); setTimeout(() => { const t = document.getElementById(k[0] === 'c' ? 'composer-ta' : 'ask-ta'); if (t) { const sec = t.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; } t.scrollIntoView({ block: 'center' }); t.focus(); } }, 0); };
+        b.innerHTML = '<div class="where">' + pageLabel(ci) + ' · ' + esc(a.path ? a.path + lineLabel(a) : ci < 0 ? 'PR conversation' : 'commit-level') + ' · ' + (k[0] === 'c' ? 'comment' : a.kind === 'modify' ? 'change request' : 'question') + '</div><div class="snip">' + esc(drafts[k].split('\n')[0]) + '</div>';
+        b.onclick = () => { go(ci); const an = Object.assign({}, a, { commitIdx: Math.max(ci, 0) }); if (k[0] === 'c') { openComposer = an; openAsk = null; } else { openAsk = an; openComposer = null; } renderAll(); setTimeout(() => { const t = document.getElementById(k[0] === 'c' ? 'composer-ta' : 'ask-ta'); if (t) { const sec = t.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; } t.scrollIntoView({ block: 'center' }); t.focus(); } }, 0); };
         g.appendChild(b);
       });
       el.appendChild(g);
@@ -872,10 +892,10 @@
         tg.onclick = () => { showDismissed = !showDismissed; lsSet('showdismissed', showDismissed ? '1' : '0'); renderAll(); }; g.appendChild(tg);
       }
       convs.forEach(t => {
-        const ci = COMMITS.findIndex(c => c.sha === t.commit); const first = (t.messages && t.messages[0] && t.messages[0].text) || '';
+        const ci = pageOf(t); const first = (t.messages && t.messages[0] && t.messages[0].text) || '';
         const b = document.createElement('button'); b.className = 'qitem';
-        b.innerHTML = '<div class="where">' + (t.kind === 'feedback' ? 'feedback on the tool' : (ci + 1) + ' · ' + esc(t.path ? t.path + (t.line ? ':' + t.line : '') : 'commit-level')) + (t.status === 'asked' ? ' · waiting' : '') + '</div><div class="snip">' + esc(first.split('\n')[0]) + '</div>';
-        b.onclick = () => { if (t.kind === 'feedback') { fbOpen = true; renderFeedback(); return; } go(ci); setTimeout(() => { const el = t.path && t.line ? document.querySelector('[data-ids~="' + rowId(ci, t.path, t.line, t.side || 'RIGHT') + '"]') : document.getElementById('commit'); if (el) { const sec = el.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; } el.scrollIntoView({ block: 'center' }); flashRow(el); } }, 0); };
+        b.innerHTML = '<div class="where">' + (t.kind === 'feedback' ? 'feedback on the tool' : pageLabel(ci) + ' · ' + esc(t.path ? t.path + (t.line ? ':' + t.line : '') : ci < 0 ? 'PR conversation' : 'commit-level')) + (t.status === 'asked' ? ' · waiting' : '') + '</div><div class="snip">' + esc(first.split('\n')[0]) + '</div>';
+        b.onclick = () => { if (t.kind === 'feedback') { fbOpen = true; renderFeedback(); return; } go(ci); setTimeout(() => { const el = t.path && t.line ? document.querySelector('[data-ids~="' + rowId(ci, t.path, t.line, t.side || 'RIGHT') + '"]') : document.getElementById('chs-' + t.id) || document.getElementById('commit'); if (el) { const sec = el.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; } el.scrollIntoView({ block: 'center' }); flashRow(el); } }, 0); };
         g.appendChild(b);
       });
       el.appendChild(g);
@@ -916,10 +936,10 @@
       const items = all.filter(x => x.status === st); if (!items.length) return;
       const g = document.createElement('div'); g.className = 'qgroup'; g.innerHTML = '<h3><span class="pill ' + st + '">' + items.length + '</span>' + label + '</h3>';
       items.forEach(x => {
-        const ci = x.replyToConv ? 0 : COMMITS.findIndex(c => c.sha === x.commit);
+        const ci = pageOf(x);
         const b = document.createElement('button'); b.className = 'qitem';
-        b.innerHTML = '<div class="where">' + (ci + 1) + ' · ' + esc(x.replyToConv ? 'PR conversation' : x.path ? x.path + (x.line ? ':' + x.line : '') : 'commit-level') + ' · ' + (x.author === 'claude' ? 'Claude' : 'you') + '</div><div class="snip">' + esc(x.body.split('\n')[0]) + '</div>';
-        b.onclick = () => { go(ci); setTimeout(() => { const t = x.path && x.line ? document.querySelector('[data-ids~="' + rowId(ci, x.path, x.line, x.side || 'RIGHT') + '"]') : document.getElementById(x.replyToConv && document.getElementById('prconv') ? 'prconv' : 'commit'); if (t) { const sec = t.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; } t.scrollIntoView({ block: 'center' }); flashRow(t); } }, 0); };
+        b.innerHTML = '<div class="where">' + pageLabel(ci) + ' · ' + esc(x.replyToConv ? 'PR conversation' : x.path ? x.path + (x.line ? ':' + x.line : '') : 'commit-level') + ' · ' + (x.author === 'claude' ? 'Claude' : 'you') + '</div><div class="snip">' + esc(x.body.split('\n')[0]) + '</div>';
+        b.onclick = () => { go(ci); setTimeout(() => { const t = x.path && x.line ? document.querySelector('[data-ids~="' + rowId(ci, x.path, x.line, x.side || 'RIGHT') + '"]') : (x.replyToConv && document.getElementById('cds-' + x.id)) || document.getElementById('commit'); if (t) { const sec = t.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; } t.scrollIntoView({ block: 'center' }); flashRow(t); } }, 0); };
         g.appendChild(b);
       });
       el.appendChild(g);
@@ -1109,7 +1129,7 @@
     const fbAll = Object.values(threads).filter(t => t.kind === 'feedback'), fbDone = fbAll.filter(t => t.status === 'answered').length;
     if (fbDone) { const l = document.createElement('button'); l.className = 'btn small'; l.textContent = showFbDone ? 'Hide resolved feedback' : 'Show ' + fbDone + ' resolved'; l.onclick = () => { showFbDone = !showFbDone; renderFeedback(); }; l.classList.add('fbstop'); p.appendChild(l); }
     fbAll.filter(t => (showFbDone || t.status !== 'answered') && visibleThread(t)).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')).forEach(t => { const card = threadCard(t, document.getElementById('feedback')); card.classList.add('fbstop'); p.appendChild(card); });
-    const comp = askComposer({ commit: COMMITS[current].sha, commitIdx: current, kind: 'feedback' }, document.getElementById('feedback'));
+    const comp = askComposer({ commit: COMMITS[Math.max(current, 0)].sha, commitIdx: Math.max(current, 0), kind: 'feedback' }, document.getElementById('feedback'));
     comp.querySelector('#ask-cancel').onclick = closeFeedback; comp.classList.add('fbstop');
     if (draft) comp.querySelector('#ask-ta').value = draft;
     p.appendChild(comp); document.body.appendChild(p); placePanels(); restoreDrafts(); saveUi(); markFb(false);
@@ -1139,8 +1159,10 @@
   // Header panels open just under the button that opened them, not below the whole header.
   function placePanels() { [['fb-panel', 'feedback'], ['sub-panel', 'submitrev']].forEach(([pid, bid]) => { const p = document.getElementById(pid), b = document.getElementById(bid); if (!p || !b) return; const top = Math.max(8, Math.round(b.getBoundingClientRect().bottom + 6)); p.style.top = top + 'px'; p.style.maxHeight = 'calc(100vh - ' + (top + 16) + 'px)'; }); }
   function measureHead() { const st = document.documentElement.style, fh = document.querySelector('#files .file-head'); st.setProperty('--head-h', document.getElementById('top').offsetHeight + 'px'); if (fh) st.setProperty('--fh-h', fh.offsetHeight + 'px'); }
-  function go(i) { if (i < 0 || i >= COMMITS.length) return; current = i; cursorId = null; openComposer = null; editing = null; location.hash = 'commit-' + (i + 1); renderAll(); window.scrollTo({ top: 0 }); }
-  function fromHash() { const m = /^#commit-(\d+)$/.exec(location.hash); const i = m ? parseInt(m[1], 10) - 1 : 0; if (i >= 0 && i < COMMITS.length && i !== current) { current = i; openComposer = null; editing = null; renderAll(); } }
+  function go(i) { if (i < -1 || i >= COMMITS.length) return; current = i; cursorId = null; openComposer = null; editing = null; location.hash = i < 0 ? 'overview' : 'commit-' + (i + 1); renderAll(); window.scrollTo({ top: 0 }); }
+  // #overview is the PR overview (-1), #commit-N commit N; no hash is the first commit, as before the overview existed.
+  function hashIdx() { if (location.hash === '#overview') return -1; const m = /^#commit-(\d+)$/.exec(location.hash); return m ? parseInt(m[1], 10) - 1 : 0; }
+  function fromHash() { const i = hashIdx(); if (i >= -1 && i < COMMITS.length && i !== current) { current = i; openComposer = null; editing = null; renderAll(); } }
 
   function renderMode() { document.getElementById('mode').textContent = viewMode === 'split' ? 'Unified' : 'Split'; }
   document.getElementById('mode').onclick = () => { viewMode = viewMode === 'split' ? 'unified' : 'split'; lsSet('viewmode', viewMode); renderMode(); renderFiles(); };
@@ -1161,7 +1183,7 @@
     const b = document.getElementById('askreview');
     if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Click again: review the PR'; setTimeout(() => { if (b.dataset.armed === '1') { delete b.dataset.armed; b.textContent = 'Ask Claude to review'; } }, 5000); return; }
     b.dataset.armed = 'sent'; b.disabled = true; b.textContent = 'Review requested';
-    const sent = await notifyClaude({ id: 'rev-' + Date.now().toString(36) }, 'scope=pr viewing commit ' + (current + 1) + '/' + COMMITS.length, b, 'review request');
+    const sent = await notifyClaude({ id: 'rev-' + Date.now().toString(36) }, 'scope=pr viewing ' + (current < 0 ? 'the PR overview' : 'commit ' + (current + 1) + '/' + COMMITS.length), b, 'review request');
     if (sent || !notifyErr) toast('Claude is reviewing the PR; its comments will appear as proposals');
     else { delete b.dataset.armed; b.disabled = false; b.textContent = 'Ask Claude to review'; }
   };
@@ -1239,11 +1261,12 @@
     setCursor(i < 0 ? nearestStop(list, coverTop() + 12) : list[Math.max(0, Math.min(list.length - 1, i + dir))]);
   }
   function toCommits() { region = 'commits'; document.querySelectorAll('.kcur').forEach(x => x.classList.remove('kcur')); markStep(); window.scrollTo({ top: 0 }); }
-  function markStep() { document.querySelectorAll('#stepper .step').forEach((b, i) => b.classList.toggle('qcur', region === 'commits' && i === current)); const a = document.querySelector('#stepper .step.qcur'); if (a) a.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+  function markStep() { document.querySelectorAll('#stepper .step').forEach(b => b.classList.toggle('qcur', region === 'commits' && Number(b.dataset.ci) === current)); const a = document.querySelector('#stepper .step.qcur'); if (a) a.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
   function fromCommits() { region = 'diff'; markStep(); const list = arrowStops(); if (list.length) setCursor(list[0]); }
   // Enter on a card opens its reply: the reviewer thread's reply box, the follow-up to Claude, or a revision note / edit of a comment.
   function enterCard(cur) {
     if (cur.classList.contains('change')) { const b = cur.querySelector('[data-act="accept"]') || cur.querySelector('[data-act="expand"]'); if (b) b.click(); else toast('Nothing to accept here'); return; }
+    if (cur.classList.contains('prconv')) { cur.open = true; const b = cur.querySelector(':scope > .actions [data-act="convreply"]'); if (b) b.click(); else { const ta = cur.querySelector(':scope > .composer textarea'); if (ta) ta.focus(); } return; }
     if (cur.classList.contains('ghthread')) { cur.open = true; const b = Array.from(cur.querySelectorAll(':scope > .actions .btn')).pop(); if (b) b.click(); return; }
     if (cur.classList.contains('chat')) { const t = cur.querySelector('.followup textarea'); if (t) t.focus(); return; }
     const b = cur.querySelector('[data-act="edit"]'); if (b) b.click(); else toast('Nothing to reply to here');
@@ -1308,9 +1331,11 @@
       if (c) {
         const rev = Array.from(item.querySelectorAll('[data-act="edit"]')).find(x => x.textContent === 'Ask Claude to revise');
         if (rev) { rev.click(); return; }
-        askAbout({ commit: c.commit, commitIdx: current, path: c.path || null, line: c.line || null, startLine: c.startLine || null, side: c.side || null, about: c.id, aboutText: c.body || '' }); return;
+        askAbout({ commit: c.commit, commitIdx: Math.max(current, 0), path: c.path || null, line: c.line || null, startLine: c.startLine || null, side: c.side || null, about: c.id, aboutText: c.body || '' }); return;
       }
       const gt = item && item.matches('.ghthread') && item.id && GH.threads.find(t => 'ghs-' + t.id === item.id);
+      const cv = item && item.matches('.prconv') && (GH.conversation || []).find(x => x.url === item.dataset.url);
+      if (cv) { askAbout({ commit: COMMITS[0].sha, commitIdx: 0, about: cv.url, aboutText: cv.author + ': ' + cleanTextOf(cv.html) }); return; }
       if (gt) { const gb = item.querySelector('.ghbody'); askAbout({ commit: gt.commit, commitIdx: current, path: gt.path || null, line: gt.line || null, side: gt.side || null, about: gt.id, aboutText: gb ? gb.textContent : '' }); return; }
     }
     const cur = lineOf(current_());
@@ -1352,11 +1377,14 @@
   // On the commit stepper, v marks every file of the selected commit as viewed, or unmarks them all when all are viewed.
   // A stepper button with focus (clicked or reached with Tab) counts as the commit stepper too, for that button's commit,
   // and so does having no cursor at all, as right after [ or ] switch commits.
-  const focusedStep = () => { const a = document.activeElement; return a && a.matches && a.matches('#stepper .step') ? Array.from(document.querySelectorAll('#stepper .step')).indexOf(a) : -1; };
+  // The index of the commit whose stepper button has focus (-1 for the PR overview), or null.
+  const focusedStep = () => { const a = document.activeElement; return a && a.matches && a.matches('#stepper .step') ? Number(a.dataset.ci) : null; };
   function toggleViewed() {
     const fs = focusedStep();
-    if (region === 'commits' || fs >= 0 || (region === 'diff' && !current_())) {
-      const c = COMMITS[fs >= 0 ? fs : current]; if (!c || !c.files || !c.files.length) { toast('This commit has no files'); return; }
+    // The PR overview has no files: v there does nothing.
+    if ((fs !== null ? fs : current) < 0) return;
+    if (region === 'commits' || fs !== null || (region === 'diff' && !current_())) {
+      const c = COMMITS[fs !== null ? fs : current]; if (!c || !c.files || !c.files.length) { toast('This commit has no files'); return; }
       const on = !isCommitViewed(c);
       c.files.forEach(f => lsSet('viewed:' + c.sha + ':' + f.path, on ? '1' : '0'));
       renderAll(); toast(on ? 'Commit marked as viewed' : 'Commit marked as not viewed'); return;
@@ -1425,10 +1453,11 @@
   function replyKey() {
     const here = current_(); let el = lastCmt || here;
     el = el && el.closest ? el.closest('.ghthread') : null;
-    if (!el) {
-      if (lastCmt || !here || here.id !== 'prconv') return false;
-      const bs = here.querySelectorAll('[data-act="convreply"]'); if (bs.length) { bs[bs.length - 1].click(); return true; }
-      const ta = here.querySelector('.composer textarea'); if (ta) { ta.scrollIntoView({ block: 'center' }); ta.focus(); return true; }
+    if (!el) return false;
+    if (el.classList.contains('prconv')) {
+      if (el.id) el = document.getElementById(el.id) || el;
+      const ta = el.querySelector(':scope > .composer textarea'); if (ta) { el.open = true; ta.scrollIntoView({ block: 'center' }); ta.focus(); return true; }
+      const b = el.querySelector(':scope > .actions [data-act="convreply"]'); if (b) { b.click(); return true; }
       return false;
     }
     // A re-render replaces the card; act on the one now on the page.
@@ -1440,7 +1469,7 @@
   // a asks Claude to draft a reply to the selected reviewer thread; on the PR conversation, to its latest comment.
   function draftReplyKey() {
     const cur = current_();
-    if (!lastCmt && cur && cur.id === 'prconv') { const bs = cur.querySelectorAll('[data-act="draftreply"]'); if (bs.length) { bs[bs.length - 1].click(); return; } }
+    if (!lastCmt && cur && cur.classList.contains('prconv')) { const b = cur.querySelector(':scope > .actions [data-act="draftreply"]'); if (b) { b.click(); return; } }
     cardAction('[data-act="draftreply"]', 'No reviewer thread or PR conversation comment here');
   }
   function cardAction(sel, none) {
@@ -1507,7 +1536,7 @@
     const act = keys[e.key] || (e.key.length === 1 ? keys[e.key.toLowerCase()] : null);
     // Letter keys bring the cursor back to the diff, except v on the commit stepper, which marks that commit viewed,
     // and [ or ] there, which switch commits and stay on the stepper.
-    if (act) { e.preventDefault(); if (e.key.length === 1 && !((region === 'commits' || focusedStep() >= 0) && (e.key.toLowerCase() === 'v' || e.key === '[' || e.key === ']'))) toDiff(); act(); }
+    if (act) { e.preventDefault(); if (e.key.length === 1 && !((region === 'commits' || focusedStep() !== null) && (e.key.toLowerCase() === 'v' || e.key === '[' || e.key === ']'))) toDiff(); act(); }
   });
 
   // The mouse pointer hides after two idle seconds or on a key press, and comes back when the mouse moves.
@@ -1534,7 +1563,7 @@
   if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
   try { const ui = JSON.parse(lsGet('ui') || 'null'); if (ui) ({ openComposer, openAsk, editing, fbOpen, subOpen } = ui); } catch (e) {}
   if (subOpen) renderSubmit();
-  const m0 = /^#commit-(\d+)$/.exec(location.hash); if (m0) { const i = parseInt(m0[1], 10) - 1; if (i >= 0 && i < COMMITS.length) current = i; }
+  { const i = hashIdx(); if (i >= -1 && i < COMMITS.length) current = i; }
   renderAll(); restorePos();
 
   cmReady.then(ns => { cm = ns; });
