@@ -27,7 +27,11 @@
   const isReply = x => !!(x.replyTo || x.replyToConv);
   // The PR overview (description and main-thread conversation) is its own stop before the first commit: current = -1.
   // Replies to the conversation and Claude chats about it live there, though their docs name the first commit.
-  const convUrls = () => new Set((GH.conversation || []).map(c => c.url));
+  // The description counts as a conversation item: replies to it and Claude chats about it are anchored at the PR's URL.
+  const descItem = () => GH.description ? Object.assign({}, GH.description, { kind: 'description' }) : null;
+  const convItems = () => (descItem() ? [descItem()] : []).concat(GH.conversation || []);
+  const convUrls = () => new Set(convItems().map(c => c.url));
+  const convText = c => c.author + (c.kind === 'description' ? ' (PR description' + (c.title ? ' of "' + c.title + '"' : '') + '): ' : ': ') + cleanTextOf(c.html);
   const onOv = x => !!(x && (x.replyToConv || (x.about && convUrls().has(x.about))));
   const pageOf = x => onOv(x) ? -1 : COMMITS.findIndex(c => c.sha === x.commit);
   const pageLabel = ci => ci < 0 ? 'PR' : String(ci + 1);
@@ -624,25 +628,20 @@
   }
 
   // The PR overview: the description, then each main-thread conversation item (issue comments, review bodies) as its
-  // own thread card with its queued replies, Claude chats and reply buttons. No files.
+  // own thread card with its queued replies, Claude chats and reply buttons. No files. The description takes the same
+  // replies and Claude chats as a conversation item: a reply to it is a PR conversation comment.
   function renderOverview(el) {
     const desc = GH.description, conv = GH.conversation || [], c0 = COMMITS[0];
     el.innerHTML = '<h2 id="overview">Pull request overview</h2><div class="meta"><a class="sha" href="' + REPO + '/pull/' + PR_NUMBER + '" target="_blank" rel="noopener">#' + esc(String(PR_NUMBER)) + '</a><span>' + COMMITS.length + ' commit' + (COMMITS.length === 1 ? '' : 's') + '</span><span>' + conv.length + ' conversation comment' + (conv.length === 1 ? '' : 's') + '</span></div>';
     const ov = document.createElement('div'); ov.className = 'general prov'; ov.id = 'prov';
     ov.innerHTML = '<h3>Description</h3>';
-    const dd = document.createElement('div'); dd.className = 'ghthread prdesc'; dd.id = 'prdesc';
-    if (desc) dd.innerHTML = '<div class="card-head"><b>' + esc(desc.author) + '</b><span>description · ' + esc((desc.at || '').slice(0, 10)) + '</span><a href="' + esc(desc.url) + '" target="_blank" rel="noopener">open</a></div><div class="ghbody">' + (desc.html ? cleanHTML(desc.html) : '<span class="empty">No description provided.</span>') + '</div>';
-    else dd.innerHTML = '<div class="ghbody"><span class="empty">No description' + (conv.length ? '' : ' and no conversation') + '.</span></div>';
-    ov.appendChild(dd);
-    if (conv.length) {
-      const h = document.createElement('h3'); h.textContent = 'Conversation · replies are queued and posted together with "Post queued conversation replies"'; ov.appendChild(h);
-    }
-    conv.forEach((c, i) => {
-      const key = 'conv:' + c.url, m = /(\d+)\D*$/.exec(c.url || '');
-      const d = document.createElement('details'); d.className = 'ghthread prconv'; d.id = 'conv-' + (m ? m[1] : i); d.dataset.url = c.url;
+    const item = (c, id, isDesc) => {
+      const key = 'conv:' + c.url;
+      const d = document.createElement('details'); d.className = 'ghthread prconv' + (isDesc ? ' prdesc' : ''); d.id = id; d.dataset.url = c.url;
       d.open = !ghClosed.has(key) || !!(openComposer && openComposer.replyToConv === c.url) || !!(openAsk && openAsk.about === c.url);
       d.addEventListener('toggle', () => { if (d.open) ghClosed.delete(key); else ghClosed.add(key); });
-      d.innerHTML = '<summary class="card-head"><b>' + esc(c.author) + '</b><span>' + esc(c.kind) + ' · ' + esc((c.at || '').slice(0, 10)) + '</span><a href="' + esc(c.url) + '" target="_blank" rel="noopener">open on GitHub</a></summary><div class="ghc"><div class="ghbody">' + cleanHTML(c.html) + '</div></div>';
+      const body = isDesc && !c.html ? '<span class="empty">No description provided.</span>' : cleanHTML(c.html);
+      d.innerHTML = '<summary class="card-head"><b>' + esc(c.author) + '</b><span>' + esc(c.kind) + ' · ' + esc((c.at || '').slice(0, 10)) + '</span><a href="' + esc(c.url) + '" target="_blank" rel="noopener">open on GitHub</a></summary><div class="ghc"><div class="ghbody">' + body + '</div></div>';
       Object.values(comments).filter(x => x.replyToConv === c.url).forEach(x => d.appendChild(card(x)));
       aboutChats(c.url, d).forEach(x => d.appendChild(x));
       if (openComposer && openComposer.replyToConv === c.url) d.appendChild(composer(openComposer));
@@ -650,11 +649,19 @@
         const b = document.createElement('button'); b.className = 'btn small'; b.dataset.act = 'convreply'; b.textContent = 'Reply (queue)';
         b.onclick = () => { openComposer = { commit: c0.sha, commitIdx: 0, replyToConv: c.url, convAuthor: c.author }; editing = null; renderAll(); };
         const row = document.createElement('div'); row.className = 'actions'; row.appendChild(b);
-        row.appendChild(draftReplyBtn({ commit: c0.sha, commitIdx: 0, about: c.url, aboutText: c.author + ': ' + cleanTextOf(c.html), replyToConv: c.url, convAuthor: c.author }));
+        row.appendChild(draftReplyBtn({ commit: c0.sha, commitIdx: 0, about: c.url, aboutText: convText(c), replyToConv: c.url, convAuthor: c.author }));
+        const a = document.createElement('button'); a.className = 'btn small ask'; a.textContent = '? Ask Claude about it'; a.title = 'Ask Claude a question about this ' + (isDesc ? 'description' : 'comment') + ' (i)';
+        a.onclick = () => askAbout({ commit: c0.sha, commitIdx: 0, about: c.url, aboutText: convText(c) }); row.appendChild(a);
         d.appendChild(row);
       }
-      ov.appendChild(d);
-    });
+      return d;
+    };
+    if (desc) ov.appendChild(item(descItem(), 'prdesc', true));
+    else { const dd = document.createElement('div'); dd.className = 'ghthread prdesc'; dd.id = 'prdesc'; dd.innerHTML = '<div class="ghbody"><span class="empty">No description' + (conv.length ? '' : ' and no conversation') + '.</span></div>'; ov.appendChild(dd); }
+    if (conv.length) {
+      const h = document.createElement('h3'); h.textContent = 'Conversation · replies are queued and posted together with "Post queued conversation replies"'; ov.appendChild(h);
+    }
+    conv.forEach((c, i) => { const m = /(\d+)\D*$/.exec(c.url || ''); ov.appendChild(item(c, 'conv-' + (m ? m[1] : i), false)); });
     // Each card is a keyboard stop.
     Array.from(ov.children).filter(ch => ch.tagName !== 'H3').forEach((ch, i) => { ch.classList.add('gstop'); if (!ch.id) ch.id = 'prstop-' + i; });
     el.appendChild(ov);
@@ -1372,8 +1379,8 @@
         askAbout({ commit: c.commit, commitIdx: Math.max(current, 0), path: c.path || null, line: c.line || null, startLine: c.startLine || null, side: c.side || null, about: c.id, aboutText: c.body || '' }); return;
       }
       const gt = item && item.matches('.ghthread') && item.id && GH.threads.find(t => 'ghs-' + t.id === item.id);
-      const cv = item && item.matches('.prconv') && (GH.conversation || []).find(x => x.url === item.dataset.url);
-      if (cv) { askAbout({ commit: COMMITS[0].sha, commitIdx: 0, about: cv.url, aboutText: cv.author + ': ' + cleanTextOf(cv.html) }); return; }
+      const cv = item && item.matches('.prconv') && convItems().find(x => x.url === item.dataset.url);
+      if (cv) { askAbout({ commit: COMMITS[0].sha, commitIdx: 0, about: cv.url, aboutText: convText(cv) }); return; }
       if (gt) { const gb = item.querySelector('.ghbody'); askAbout({ commit: gt.commit, commitIdx: current, path: gt.path || null, line: gt.line || null, side: gt.side || null, about: gt.id, aboutText: gb ? gb.textContent : '' }); return; }
     }
     const cur = lineOf(current_());
