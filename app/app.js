@@ -533,6 +533,8 @@
     return '<div class="minidiff">' + diffRows(o, n, x => hl(x, lang), 2) + (n.length ? '' : '<div class="md-n">(the lines are deleted)</div>') + '</div>';
   }
   const chgOpen = new Set(), chgBusy = new Set(); // settled cards the viewer unfolded; accepts in flight
+  // Applied-at-your-request cards start open; the ones the viewer hid stay hidden across reloads.
+  let chgHidden = new Set(); try { chgHidden = new Set(JSON.parse(lsGet('chghidden') || '[]') || []); } catch (e) {}
   // Accepting is instant: the card turns accepted and the overlay shows at once. On the viewer's PR, Claude then folds it onto the
   // review branch in the background (applied: false until then); on others' PRs the page queues the suggestion itself.
   // Accepting a change settles the conversation that asked for it: it is dismissed (restorable from the queue).
@@ -586,10 +588,10 @@
     } finally { chgNotesInFlight.delete(ch.id); }
   }
   function changeCard(ch) {
-    const st = ch.status || 'proposed', d = document.createElement('div'); d.className = 'card change cs-' + st; d.id = 'chg-' + ch.id; d.dataset.chg = ch.id;
+    const st = ch.status || 'proposed', d = document.createElement('div'); d.className = 'card change cs-' + st + (st === 'accepted' && ch.autoApplied ? ' autoapplied' : ''); d.id = 'chg-' + ch.id; d.dataset.chg = ch.id;
     // A change Claude applied because the viewer asked for it stays open, so the viewer sees what changed and can revert it.
     const auto = st === 'accepted' && !!ch.autoApplied;
-    const fold = (st === 'accepted' && !auto && !ch.revertError) || st === 'declined' || st === 'stale', folded = fold && !chgOpen.has(ch.id);
+    const fold = (st === 'accepted' && !ch.revertError) || st === 'declined' || st === 'stale', folded = fold && (auto ? chgHidden.has(ch.id) : !chgOpen.has(ch.id));
     const title = auto ? '<b>Applied at your request</b>' : st === 'accepted' ? '<b>Accepted</b>' : st === 'declined' ? '<b class="struck">Declined</b>' : st === 'stale' ? '<b>Not applied: the PR changed under it</b>' : ch.op === 'drop' && !ch.path ? '<b>Proposed: drop this commit</b>' : ch.op === 'reword' && !ch.path ? '<b>Proposed: new commit message</b>' : '<b>Proposed change</b>';
     const spill = st === 'accepting' ? '<span class="pill revise">accepting</span>' : st === 'failed' ? '<span class="pill warn">failed</span>' : st === 'proposed' ? '<span class="pill proposed">proposed</span>' + (ch.revertedAt ? '<span class="pill" title="Reverted on the review branch">reverted</span>' : '') : ch.reverting ? '<span class="pill revise">reverting' + WAIT_DOTS + '</span>' : '';
     const sha = esc((ch.newCommit || '').slice(0, 10)), br = esc(ch.branch || 'the review branch');
@@ -621,6 +623,7 @@
       else if (act === 'cancelrevchg') { editing = null; renderAll(); }
       else if (act === 'sendchgnote') { const v = document.getElementById('ta-chg-' + ch.id).value.trim(); if (v) sendChangeNote(ch, v, d); }
       else if (act === 'withdrawrevchg') writeChange(ch.id, { note: null, noteAt: null }).then(ok => { if (ok) toast('Request withdrawn'); });
+      else if (act === 'expand' && auto) { if (chgHidden.has(ch.id)) chgHidden.delete(ch.id); else chgHidden.add(ch.id); lsSet('chghidden', JSON.stringify(Array.from(chgHidden))); renderFiles(); }
       else if (act === 'expand') { if (chgOpen.has(ch.id)) chgOpen.delete(ch.id); else chgOpen.add(ch.id); renderFiles(); }
       else if (act === 'gocomment') { const c = comments[ch.commentId]; if (c) jumpTo(onOv(c) ? null : c.commit, 'cds-' + c.id); else toast('The suggestion is not loaded yet'); }
     });
@@ -1595,7 +1598,7 @@
       ']': () => go(current + 1), '[': () => go(current - 1), ArrowRight: () => sideKey('RIGHT') || toQueue(), ArrowLeft: () => sideKey('LEFT') || toDiff(),
       j: () => moveCursor(-1, true), ArrowUp: () => region === 'queue' ? moveQ(-1) : arrowMove(-1), l: () => moveCursor(1, true), ArrowDown: () => region === 'queue' ? moveQ(1) : arrowMove(1),
       PageUp: () => pageCursor(-1), PageDown: () => pageCursor(1),
-      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), v: () => toggleViewed(), t: () => showKeys(document.getElementById('keys-panel').hidden), f: () => toggleFeedback(), d: () => ghResolveKey() || cardAction(['[data-act="dismiss"], .chat [data-act="restore"]', '[data-act="reject"], .card > .actions [data-act="restore"]', '[data-act="hidedisc"], [data-act="showdisc"]', '.change [data-act="decline"], .change [data-act="restorechg"]', '.ghthread > .actions [data-act="ghresolve"], .ghthread > .actions [data-act="ghunresolve"]'], 'Nothing to dismiss here'), q: () => cardAction(['[data-act="approve"]', '.change [data-act="accept"]'], 'No proposed comment or change here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), a: () => draftReplyKey(), c: () => toggleTop(), Enter: () => enterCursor()
+      n: () => stepComment(1), p: () => stepComment(-1), k: () => lineAction('.addbtn'), i: () => lineAction('.askbtn'), u: () => toggleSubmit(), v: () => toggleViewed(), t: () => showKeys(document.getElementById('keys-panel').hidden), f: () => toggleFeedback(), d: () => ghResolveKey() || cardAction(['[data-act="dismiss"], .chat [data-act="restore"]', '[data-act="reject"], .card > .actions [data-act="restore"]', '[data-act="hidedisc"], [data-act="showdisc"]', '.change [data-act="decline"], .change [data-act="restorechg"], .change.autoapplied [data-act="expand"]', '.ghthread > .actions [data-act="ghresolve"], .ghthread > .actions [data-act="ghunresolve"]'], 'Nothing to dismiss here'), q: () => cardAction(['[data-act="approve"]', '.change [data-act="accept"]'], 'No proposed comment or change here'), r: () => cardAction('[data-act="reviewed"]', 'No Claude comment to mark here'), h: () => document.getElementById('queuetoggle').click(), m: () => lineAction('.modbtn'), a: () => draftReplyKey(), c: () => toggleTop(), Enter: () => enterCursor()
     };
     const act = keys[e.key] || (e.key.length === 1 ? keys[e.key.toLowerCase()] : null);
     // Letter keys bring the cursor back to the diff, except v on the commit stepper, which marks that commit viewed,
