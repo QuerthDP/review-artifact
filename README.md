@@ -8,7 +8,7 @@ A [Claude Code](https://claude.com/claude-code) skill that turns a GitHub pull r
 - Ask Claude about any line or commit; the conversation stays on the page.
 - Other reviewers' threads appear on their lines; reply to them in place.
 - Everything you queue is mirrored into **your pending GitHub review**, which stays private until you submit it yourself.
-- `m` makes Claude propose the change as a card with Accept / Decline. On your own PR, Accept folds it into its commit on a `review/pr-<N>` branch pushed to your fork (the previous version kept as `review/pr-<N>-v<k>`); "Push to the PR" moves it onto your PR branch. Nothing is ever pushed to the upstream repository and the page shows the new lines in amber over the diff; on someone else's PR, Accept queues it as a ```` ```suggestion ```` comment.
+- `m` makes Claude propose the change as a card with Accept / Decline. On your own PR, Accept folds it into its commit on a `review/pr-<N>` branch pushed to your fork (the previous version kept as `review/pr-<N>-v<k>`); "Push to the PR" moves it onto your PR branch. Nothing is ever pushed to the upstream repository and the page shows the new lines in amber over the diff; on someone else's PR, Accept queues it as a ```` ```suggestion ```` comment. On your own PR, the changes you ask for with `m` are applied at once (no Accept needed) and their cards stay open with a **Revert** button; Claude's own proposals still wait for Accept. The changes of one request are accepted and reverted together.
 
 ## Install
 

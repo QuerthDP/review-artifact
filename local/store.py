@@ -5,6 +5,8 @@
   store.py [--port 8765] set|update <collection> <id> <json | @file>   update merges fields; {"__delete__": true} removes one
   store.py [--port 8765] delete <collection> <id>
   store.py [--port 8765] batch <json | @file>                         [{op, collection, doc_id, data}], as seeds.py writes them
+  store.py [--port 8765] apply <change id>...                          accepts written changes the user asked for (autoApplied),
+                                                                      in order, as the page's Accept does: onto review/pr-<N>
   store.py [--port 8765] next [--wait 540]                            the page's next requests to Claude, one JSON line each;
                                                                       "idle" after the wait, "server stopped" (exit 3) once it is gone
   store.py [--port 8765] wait                                          blocks, taking nothing, until the page has sent requests:
@@ -50,6 +52,14 @@ elif cmd == 'wait':
             if isinstance(e, TimeoutError) or isinstance(getattr(e, 'reason', None), TimeoutError): continue
             print('server stopped'); sys.exit(3)
         if n: print('pending', n); break
+elif cmd == 'apply':
+    import time
+    if not call('review').get('mine'): sys.exit('not the user\'s own PR: leave the changes proposed')
+    for i in a[1:]:
+        at = time.strftime('%Y-%m-%dT%H:%M:%S.000Z', time.gmtime())
+        r = call('db', {'op': 'update', 'col': 'changes', 'id': i, 'data': {'status': 'accepted', 'applied': False, 'autoApplied': True, 'decidedAt': at, 'error': {'__delete__': True}}})
+        if not all(r['ok']): sys.exit(f'{i}: version conflict')
+        call('claude', {'threadId': None, 'text': f'[accept change {i}] applied at the user\'s request'}); print('applying', i)
 elif cmd == 'batch':
     r = call('db', {'op': 'batch', 'writes': arg(a[1])}); print(sum(r['ok']), 'of', len(r['ok']), 'writes applied')
 else: sys.exit(__doc__)

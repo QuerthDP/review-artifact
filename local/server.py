@@ -264,7 +264,7 @@ def worker():
         try: job()
         except Exception: log('job failed:', traceback.format_exc())
 
-MECHANICAL = re.compile(r'^\[(accept change|push review branch|github sync|submit review|post conversation replies) ([^\]]*)\]\s*(.*)', re.S)
+MECHANICAL = re.compile(r'^\[(accept change|revert change|push review branch|github sync|submit review|post conversation replies) ([^\]]*)\]\s*(.*)', re.S)
 def route(thread, text):
     """Runs a mechanical request here; queues anything else for Claude. Returns the thread id the page keeps."""
     mm = MECHANICAL.match(text)
@@ -272,6 +272,7 @@ def route(thread, text):
     kind, ident, rest = mm[1], mm[2].strip(), mm[3]
     tid = thread or f'local_{int(time.time() * 1000)}'
     if kind == 'accept change': enqueue(lambda: accept_change(ident))
+    elif kind == 'revert change': enqueue(lambda: revert_change(ident))
     elif kind == 'push review branch': enqueue(lambda: push_review_branch(rest))
     elif kind == 'github sync': enqueue(github_sync)
     elif kind == 'submit review': enqueue(lambda: submit_review(rest))
@@ -377,6 +378,41 @@ def replace_block(path, old, new, near):
     i = min(hits, key=lambda h: abs(h + 1 - (near or 0)))
     lines[i:i + k] = new; open(full, 'w').write('\n'.join(lines))
 
+def keep_version():
+    """Keeps the review branch as it is now as review/pr-<N>-v<k> (next free k) and returns that name."""
+    k = 1
+    while git('rev-parse', '--verify', '-q', f'refs/heads/{BRANCH}-v{k}', check=False).strip(): k += 1
+    keep = f'{BRANCH}-v{k}'; git('branch', keep, BRANCH); return keep
+def vnum(keep):
+    mm = re.search(r'-v(\d+)$', keep or ''); return int(mm[1]) if mm else -1
+
+def apply_change(cid, ch):
+    """Folds one change into its commit on the review branch (worktree at WT); returns the doc fields it sets."""
+    target, idx = target_of(ch['commit'])
+    if ch.get('op') in ('drop', 'reword'):
+        msg = None
+        if ch['op'] == 'reword':
+            msg = os.path.join(STATE, f'msg-{cid}.txt'); open(msg, 'w').write(ch.get('message', '').rstrip() + '\n')
+        wgit('rebase', '-q', '-i', REVIEW['base'], env=editor_env(ch['op'], target, msg))
+    else:
+        replace_block(ch['path'], ch.get('old') or [], ch.get('new') or [], ch.get('startLine') or ch.get('line'))
+        wgit('add', '--', ch['path'])
+        wgit('commit', '-q', f'--fixup={target}')
+        wgit('rebase', '-q', '-i', '--autosquash', '--empty=drop', REVIEW['base'], env=dict(os.environ, GIT_SEQUENCE_EDITOR='true', GIT_EDITOR='true'))
+    new_commit = next((s for s, t in series() if t == (ch.get('message', '').split('\n')[0] if ch.get('op') == 'reword' else REVIEW['data']['commits'][idx]['subject'])), None)
+    data = {'applied': True, 'status': 'accepted', 'branch': BRANCH, 'error': DEL}
+    if new_commit and ch.get('op') != 'drop': data['newCommit'] = new_commit
+    return data
+
+def push_branch(datas):
+    """Pushes the review branch to the user's fork with lease and adds the commit and compare links to each doc's fields."""
+    if not FORK or NO_PUSH: return
+    git('fetch', '-q', FORK, f'+refs/heads/{BRANCH}:refs/remotes/{FORK}/{BRANCH}', check=False)  # the lease compares with what the fork has now
+    git('push', '-q', '--force-with-lease', FORK, f'{BRANCH}:{BRANCH}')
+    for data in datas:
+        if data.get('newCommit'): data['commitUrl'] = f"https://github.com/{LOGIN}/{NAME}/commit/{data['newCommit']}"
+        data['compareUrl'] = f"https://github.com/{SLUG}/compare/{REVIEW['headRef']}...{LOGIN}:{BRANCH}"
+
 def accept_change(cid):
     ch = DB['docs']['changes'].get(cid)
     if not ch or ch.get('applied') or ch.get('status') not in ('accepted', 'accepting'): return
@@ -386,29 +422,10 @@ def accept_change(cid):
     keep = None
     try:
         ensure_worktree()
-        k = 1
-        while git('rev-parse', '--verify', '-q', f'refs/heads/{BRANCH}-v{k}', check=False).strip(): k += 1
-        keep = f'{BRANCH}-v{k}'; git('branch', keep, BRANCH)
-        target, idx = target_of(ch['commit'])
-        if ch.get('op') in ('drop', 'reword'):
-            msg = None
-            if ch['op'] == 'reword':
-                msg = os.path.join(STATE, f'msg-{cid}.txt'); open(msg, 'w').write(ch.get('message', '').rstrip() + '\n')
-            wgit('rebase', '-q', '-i', REVIEW['base'], env=editor_env(ch['op'], target, msg))
-        else:
-            replace_block(ch['path'], ch.get('old') or [], ch.get('new') or [], ch.get('startLine') or ch.get('line'))
-            wgit('add', '--', ch['path'])
-            wgit('commit', '-q', f'--fixup={target}')
-            wgit('rebase', '-q', '-i', '--autosquash', '--empty=drop', REVIEW['base'], env=dict(os.environ, GIT_SEQUENCE_EDITOR='true', GIT_EDITOR='true'))
-        ser = series()
-        new_commit = next((s for s, t in ser if t == (ch.get('message', '').split('\n')[0] if ch.get('op') == 'reword' else REVIEW['data']['commits'][idx]['subject'])), None)
-        data = {'applied': True, 'status': 'accepted', 'branch': BRANCH, 'error': DEL}
-        if new_commit and ch.get('op') != 'drop': data['newCommit'] = new_commit
-        if FORK and not NO_PUSH:
-            git('fetch', '-q', FORK, f'+refs/heads/{BRANCH}:refs/remotes/{FORK}/{BRANCH}', check=False)  # the lease compares with what the fork has now
-            git('push', '-q', '--force-with-lease', FORK, f'{BRANCH}:{BRANCH}')
-            if new_commit and ch.get('op') != 'drop': data['commitUrl'] = f'https://github.com/{LOGIN}/{NAME}/commit/{new_commit}'
-            data['compareUrl'] = f"https://github.com/{SLUG}/compare/{REVIEW['headRef']}...{LOGIN}:{BRANCH}"
+        keep = keep_version()
+        data = apply_change(cid, ch)
+        data['keptAs'] = keep  # the branch as it was before this change: a Revert starts from it
+        push_branch([data])
         commit_writes([{'op': 'update', 'col': 'changes', 'id': cid, 'data': data}])
         log('accepted', cid, 'on', BRANCH)
     except Exception as e:
@@ -416,6 +433,45 @@ def accept_change(cid):
         if keep: wgit('reset', '-q', '--hard', keep, check=False)
         commit_writes([{'op': 'update', 'col': 'changes', 'id': cid, 'data': {'status': 'failed', 'error': str(e)[:300]}}])
         log('accept failed', cid, e)
+
+def revert_change(cid):
+    """Undoes a change and every other change of its request (same thread) as if they had never been accepted: resets the
+    review branch to the version kept before the first of them and folds in again, in order, the changes accepted after it.
+    They go back to proposed. If a later change no longer applies without them, nothing changes and the card says why."""
+    changes = DB['docs']['changes']; ch = changes.get(cid)
+    if not ch or not ch.get('reverting'): return
+    tid = ch.get('threadId')
+    group = [i for i, d in changes.items() if i == cid or (tid and d.get('threadId') == tid and d.get('status') == 'accepted' and d.get('applied'))]
+    clear = lambda extra: [{'op': 'update', 'col': 'changes', 'id': i, 'data': dict({'reverting': DEL}, **extra)} for i in group]
+    applied = {i: d for i, d in changes.items() if d.get('status') == 'accepted' and d.get('applied')}
+    why = (None if REVIEW['data']['mine'] else 'only a change on your own PR can be reverted') or \
+          next((f'{i} is not on the review branch' for i in group if i not in applied), None) or \
+          next((f'{i} was accepted before Revert existed, so its place in the series is not known' for i, d in applied.items() if not d.get('keptAs')), None)
+    if why: commit_writes(clear({'revertError': why})); log('revert refused', cid, why); return
+    start = min(vnum(applied[i]['keptAs']) for i in group)
+    later = sorted((x for x in applied.items() if x[0] not in group and vnum(x[1]['keptAs']) > start), key=lambda x: vnum(x[1]['keptAs']))
+    backup = None
+    try:
+        ensure_worktree()
+        backup = keep_version()
+        wgit('reset', '-q', '--hard', next(applied[i]['keptAs'] for i in group if vnum(applied[i]['keptAs']) == start))
+        writes, datas = [], []
+        for i, d in later:
+            keep = keep_version()
+            try: data = apply_change(i, d)
+            except Exception as e: raise RuntimeError(f'{i}, accepted after it, does not apply without it ({str(e)[:120]}); revert that one first')
+            data['keptAs'] = keep; datas.append(data); writes.append({'op': 'update', 'col': 'changes', 'id': i, 'data': data})
+        push_branch(datas)
+        at = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        writes += clear({'status': 'proposed', 'revertedAt': at, 'applied': DEL, 'newCommit': DEL, 'commitUrl': DEL, 'keptAs': DEL, 'decidedAt': DEL, 'autoApplied': DEL, 'revertError': DEL, 'error': DEL})
+        writes += [{'op': 'update', 'col': 'changes', 'id': i, 'data': {'revertError': DEL}} for i, d in applied.items() if i not in group and d.get('revertError')]
+        commit_writes(writes)
+        log('reverted', ', '.join(group), 'on', BRANCH, '; reapplied', len(later))
+    except Exception as e:
+        wgit('rebase', '--abort', check=False)
+        if backup: wgit('reset', '-q', '--hard', backup, check=False)
+        commit_writes(clear({'revertError': str(e)[:300]}))
+        log('revert failed', cid, e)
 
 def push_review_branch(rest):
     ids = re.findall(r'[\w-]+', rest.split('(', 1)[1]) if '(' in rest else []

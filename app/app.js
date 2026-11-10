@@ -537,7 +537,22 @@
   // review branch in the background (applied: false until then); on others' PRs the page queues the suggestion itself.
   // Accepting a change settles the conversation that asked for it: it is dismissed (restorable from the queue).
   const dismissOrigin = ch => { const t = ch.threadId && threads[ch.threadId]; if (t && !t.dismissed && t.status === 'answered') writeThread(t.id, { dismissed: true, updatedAt: new Date().toISOString() }, false); };
-  async function acceptChange(ch, el) {
+  // The changes Claude wrote for one request (one thread) go together: Accept takes them all, Revert undoes them all.
+  const byIdNum = (a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
+  const groupOf = (ch, sts) => (ch.threadId ? Object.values(changes).filter(x => x.threadId === ch.threadId && x.id !== ch.id && sts.includes(x.status || 'proposed')) : []).concat([ch]).sort(byIdNum);
+  const acceptGroup = ch => groupOf(ch, ['proposed', 'failed']).filter(x => x.id === ch.id || !x.note);
+  const revertGroup = ch => groupOf(ch, ['accepted']).filter(x => x.keptAs || x.applied === false);
+  const canRevert = ch => PR_MINE && ch.status === 'accepted' && (ch.keptAs || ch.applied === false) && !ch.reverting;
+  async function acceptChange(ch, el) { for (const x of acceptGroup(ch)) await acceptOne(x, x.id === ch.id ? el : null); }
+  // Revert undoes the change and the rest of its request on the review branch, as if they were never accepted (they turn
+  // proposed again); changes accepted after them are folded in again. The server does it at once.
+  async function revertChange(ch, el) {
+    const grp = revertGroup(ch), at = new Date().toISOString();
+    for (const x of grp) if (!await writeChange(x.id, { reverting: at, revertError: null })) return;
+    toast(grp.length > 1 ? 'Reverting ' + grp.length + ' changes' : 'Reverting');
+    notifyClaude(ch, ch.shellThreadId ? '[revert change ' + ch.id + ']' : 'undo it and the rest of its request on the review branch', el, 'revert change');
+  }
+  async function acceptOne(ch, el) {
     if (chgBusy.has(ch.id)) return; chgBusy.add(ch.id);
     try {
       const at = new Date().toISOString();
@@ -551,7 +566,7 @@
       }
       if (!await writeChange(ch.id, { status: 'accepted', applied: false, decidedAt: at, error: null })) return;
       dismissOrigin(ch); toast('Accepted');
-      const live = document.getElementById('chg-' + ch.id);
+      const live = document.getElementById('chg-' + ch.id) || el;
       notifyClaude(ch, ch.shellThreadId ? '[accept change ' + ch.id + ']' : 'apply it on the review branch', live || el, 'accept change').then(sid => writeChange(ch.id, { shellThreadId: sid || ch.shellThreadId || null, notifyError: sid || ch.shellThreadId ? null : notifyErr }));
     } finally { chgBusy.delete(ch.id); }
   }
@@ -572,21 +587,24 @@
   }
   function changeCard(ch) {
     const st = ch.status || 'proposed', d = document.createElement('div'); d.className = 'card change cs-' + st; d.id = 'chg-' + ch.id; d.dataset.chg = ch.id;
-    const fold = st === 'accepted' || st === 'declined' || st === 'stale', folded = fold && !chgOpen.has(ch.id);
-    const title = st === 'accepted' ? '<b>Accepted</b>' : st === 'declined' ? '<b class="struck">Declined</b>' : st === 'stale' ? '<b>Not applied: the PR changed under it</b>' : ch.op === 'drop' && !ch.path ? '<b>Proposed: drop this commit</b>' : ch.op === 'reword' && !ch.path ? '<b>Proposed: new commit message</b>' : '<b>Proposed change</b>';
-    const spill = st === 'accepting' ? '<span class="pill revise">accepting</span>' : st === 'failed' ? '<span class="pill warn">failed</span>' : st === 'proposed' ? '<span class="pill proposed">proposed</span>' : '';
+    // A change Claude applied because the viewer asked for it stays open, so the viewer sees what changed and can revert it.
+    const auto = st === 'accepted' && !!ch.autoApplied;
+    const fold = (st === 'accepted' && !auto && !ch.revertError) || st === 'declined' || st === 'stale', folded = fold && !chgOpen.has(ch.id);
+    const title = auto ? '<b>Applied at your request</b>' : st === 'accepted' ? '<b>Accepted</b>' : st === 'declined' ? '<b class="struck">Declined</b>' : st === 'stale' ? '<b>Not applied: the PR changed under it</b>' : ch.op === 'drop' && !ch.path ? '<b>Proposed: drop this commit</b>' : ch.op === 'reword' && !ch.path ? '<b>Proposed: new commit message</b>' : '<b>Proposed change</b>';
+    const spill = st === 'accepting' ? '<span class="pill revise">accepting</span>' : st === 'failed' ? '<span class="pill warn">failed</span>' : st === 'proposed' ? '<span class="pill proposed">proposed</span>' + (ch.revertedAt ? '<span class="pill" title="Reverted on the review branch">reverted</span>' : '') : ch.reverting ? '<span class="pill revise">reverting' + WAIT_DOTS + '</span>' : '';
     const sha = esc((ch.newCommit || '').slice(0, 10)), br = esc(ch.branch || 'the review branch');
     const pill = st !== 'accepted' ? '' : PR_MINE && ch.applied === false ? '<span class="pill revise" title="Claude is putting it on the review branch; no need to wait">applying' + WAIT_DOTS + '</span>' : !PR_MINE ? '<button class="pill queued linkbtn" data-act="gocomment" title="Go to the comment in your queue">' + (ch.path ? 'suggestion' : 'comment') + ' queued</button>' : ch.commitUrl ? '<a class="pill queued" href="' + esc(ch.commitUrl) + '" target="_blank" rel="noopener">' + (sha ? sha + ' on ' : 'on ') + br + '</a>' : '<span class="pill queued">' + (sha ? sha + ' on ' : 'on ') + br + '</span>';
     const tip = PR_MINE ? (ch.path ? 'Claude folds it into the commit' : ch.op === 'drop' ? 'Claude drops the commit' : 'Claude rewrites the commit message') + ' and pushes the review branch to your fork' : ch.path ? 'Queues it as a GitHub suggestion in your pending review' : 'Queues it as a commit-level comment in your pending review';
-    const acc = '<button class="btn primary small" data-act="accept" title="' + tip + '">' + (st === 'failed' ? 'Retry' : 'Accept') + '</button>', dec = '<button class="btn small" data-act="decline">Decline</button>';
+    const na = st === 'proposed' || st === 'failed' ? acceptGroup(ch).length : 1, nr = canRevert(ch) ? revertGroup(ch).length : 0;
+    const acc = '<button class="btn primary small" data-act="accept" title="' + tip + (na > 1 ? ', with the other ' + (na - 1) + ' change' + (na > 2 ? 's' : '') + ' of this request' : '') + '">' + (st === 'failed' ? 'Retry' : 'Accept') + (na > 1 ? ' all ' + na : '') + '</button>', dec = '<button class="btn small" data-act="decline">Decline</button>';
     // Like a Claude comment, a change can go back to Claude with a note; it stays proposed (and cannot be accepted) until
     // Claude rewrites it, and the notes and Claude's replies stay on the card.
     const revising = !!ch.note, revEd = editing === 'chg:' + ch.id && !revising && (st === 'proposed' || st === 'failed');
     const rev = '<button class="btn small" data-act="revisechg">Ask Claude to revise</button>';
-    const acts = st === 'proposed' || st === 'failed' ? (revising ? '<button class="btn small" data-act="withdrawrevchg">Withdraw request</button>' + dec : revEd ? '' : acc + rev + dec) : st === 'declined' ? '<button class="btn small" data-act="restorechg">Restore</button>' : st === 'stale' ? dec : '';
+    const acts = st === 'proposed' || st === 'failed' ? (revising ? '<button class="btn small" data-act="withdrawrevchg">Withdraw request</button>' + dec : revEd ? '' : acc + rev + dec) : st === 'declined' ? '<button class="btn small" data-act="restorechg">Restore</button>' : st === 'stale' ? dec : nr ? '<button class="btn small" data-act="revert" title="Undo ' + (nr > 1 ? 'these ' + nr + ' changes of one request' : 'it') + ' on the review branch, as if never accepted">Revert' + (nr > 1 ? ' all ' + nr : '') + '</button>' : '';
     const toggle = fold ? '<button class="btn small" data-act="expand">' + (folded ? 'Show change' : 'Hide change') + '</button>' : '';
     const wait = st === 'accepting' ? '<div class="pending">Waiting for Claude' + WAIT_DOTS + (ch.shellThreadId || !ch.notifyError ? '' : ' (not notified: tell Claude in chat to apply accepted changes)') + '</div>' : '';
-    const err = st === 'failed' && ch.error ? '<div class="note chgerr">' + md(ch.error) + '</div>' : '';
+    const err = st === 'failed' && ch.error ? '<div class="note chgerr">' + md(ch.error) + '</div>' : st === 'accepted' && ch.revertError ? '<div class="note chgerr">Revert failed: ' + md(ch.revertError) + '</div>' : '';
     const msgs = (ch.discussion || []).map(m => '<div class="msg-row ' + m.role + '"><span class="who">' + (m.role === 'claude' ? 'Claude' : 'You') + '</span><div class="body">' + md(m.text) + '</div></div>').join('');
     const revWait = revising ? '<div class="pending">Waiting for Claude to revise it' + WAIT_DOTS + (ch.notifyError ? ' (not notified: tell Claude in chat to pick up change revision requests)' : '') + '</div>' : '';
     const disc = msgs || revWait ? '<div class="discussion">' + msgs + revWait + '</div>' : '';
@@ -596,6 +614,7 @@
       const b = e.target.closest && e.target.closest('[data-act]'), act = b && b.dataset.act; if (!act) return;
       const at = new Date().toISOString();
       if (act === 'accept') acceptChange(ch, d);
+      else if (act === 'revert') revertChange(ch, d);
       else if (act === 'decline') writeChange(ch.id, { status: 'declined', decidedAt: at }).then(ok => { if (ok) toast('Declined'); });
       else if (act === 'restorechg') writeChange(ch.id, { status: 'proposed', decidedAt: null }).then(ok => { if (ok) toast('Back to proposed'); });
       else if (act === 'revisechg') { editing = 'chg:' + ch.id; openComposer = null; renderAll(); setTimeout(() => { const t = document.getElementById('ta-chg-' + ch.id); if (t) { t.scrollIntoView({ block: 'center' }); t.focus(); } }, 0); }
