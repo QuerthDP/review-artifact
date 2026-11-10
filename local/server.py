@@ -138,7 +138,7 @@ def app_version():
     except (OSError, subprocess.SubprocessError): return ''
 
 def snapshot():
-    return {'version': DB['version'], 'reviewVersion': REVIEW.get('reviewVersion'), 'appVersion': app_version(), 'docs': DB['docs'], 'docVersions': DB['docVersions']}
+    return {'version': DB['version'], 'reviewVersion': REVIEW.get('reviewVersion'), 'ghVersion': REVIEW.get('ghVersion'), 'appVersion': app_version(), 'docs': DB['docs'], 'docVersions': DB['docVersions']}
 
 # ---- PR data -----------------------------------------------------------------------------------------------------
 def build():
@@ -154,7 +154,7 @@ def build():
                'snapdir': os.path.join(STATE, 'ghsync-snapshots')}, open(os.path.join(STATE, 'ghsync.json'), 'w'))
     try: collapsed = json.load(open(os.path.join(STATE, 'collapsed.json')))
     except FileNotFoundError: collapsed = ['Cargo.lock', 'package-lock.json', 'yarn.lock', 'go.sum']
-    REVIEW.update(reviewVersion=head, base=base, headRef=head_ref, headRepo=(pr['head']['repo'] or {}).get('full_name'), state=pr['state'],
+    REVIEW.update(reviewVersion=head, ghVersion=pr.get('updated_at') or '', ghSeen=pr.get('updated_at') or '', base=base, headRef=head_ref, headRepo=(pr['head']['repo'] or {}).get('full_name'), state=pr['state'],
                   data={'cfg': {'repo': SLUG, 'pr': N, 'session': SESSION, 'collapsed': collapsed, 'local': True},
                         'pr': {'title': pr['title'], 'author': pr['user']['login'], 'head': head},
                         'mine': pr['user']['login'] == LOGIN, 'commits': json.load(open(diff)), 'gh': json.load(open(ghp))})
@@ -176,13 +176,29 @@ def watch_head():
     while True:
         time.sleep(60)
         try:
-            head, state = (run('gh', 'api', f'repos/{SLUG}/pulls/{N}', '--jq', '.head.sha + " " + .state').split() + ['', ''])[:2]
+            head, state, updated = (run('gh', 'api', f'repos/{SLUG}/pulls/{N}', '--jq', '.head.sha + " " + .state + " " + .updated_at').split() + ['', '', ''])[:3]
             if state and state != 'open': return close_down()
             if head and head != REVIEW.get('reviewVersion'):
                 old = REVIEW.get('reviewVersion'); build()
                 with lock: DB['version'] += 1; lock.notify_all()
                 to_claude(None, f'[new head {head}] the PR head moved from {old}; mark accepted changes landed or stale as the workflow says')
+            elif updated and updated != REVIEW.get('ghSeen'): refresh_gh(updated)
         except Exception as e: log('head check failed:', e)
+
+def refresh_gh(updated):
+    """The PR changed on GitHub without a new head (description or title edited, new comments or reviews): reload its
+    GitHub data, and open tabs when it differs from what they show."""
+    pr = gh_json(f'repos/{SLUG}/pulls/{N}')
+    ghp = os.path.join(STATE, 'gh.json'); tmp = ghp + '.new'
+    run(sys.executable, '-I', os.path.join(R, 'scripts/ghthreads.py'), REPO_DIR, SLUG, str(N), os.path.join(STATE, 'diff.json'), tmp, env=ENV)
+    gh = json.load(open(tmp)); data = REVIEW['data']
+    if gh == data['gh'] and pr['title'] == data['pr']['title']:
+        os.remove(tmp); REVIEW['ghSeen'] = updated; return
+    os.replace(tmp, ghp)
+    with lock:
+        data['gh'] = gh; data['pr']['title'] = pr['title']; REVIEW.update(ghVersion=updated, ghSeen=updated)
+        DB['version'] += 1; lock.notify_all()
+    log('GitHub data refreshed', updated)
 
 def close_down():
     """The PR is closed: tell the agent, give it time to take the message, then stop."""
@@ -425,7 +441,7 @@ class H(BaseHTTPRequestHandler):
         if not self.local_host(): return self.send(403, {'error': 'bad host'})
         u = urlparse(self.path); q = parse_qs(u.query)
         if u.path == '/api/ping': return self.send(200, {'pr': f'{SLUG}#{N}', 'pid': os.getpid()})
-        if u.path == '/api/review': return self.send(200, dict(REVIEW['data'], reviewVersion=REVIEW['reviewVersion'], appVersion=app_version()))
+        if u.path == '/api/review': return self.send(200, dict(REVIEW['data'], reviewVersion=REVIEW['reviewVersion'], ghVersion=REVIEW.get('ghVersion'), appVersion=app_version()))
         if u.path == '/api/db':
             since = int((q.get('since') or ['-1'])[0])
             with lock:
