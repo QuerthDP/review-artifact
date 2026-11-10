@@ -689,12 +689,41 @@
     el.appendChild(ov);
   }
 
+  // Accepted changes rewrite the review branch, so a file's +/− there differs from the PR's: a replaced line the commit added
+  // no longer counts as added, a replaced line it kept counts as removed, and each new line counts as added. Null when no
+  // accepted change touches the file.
+  function branchStat(c, f) {
+    if (!PR_MINE) return null;
+    const ovs = Object.values(changes).filter(x => x.status === 'accepted' && x.commit === c.sha && x.path === f.path && x.line && (x.side || 'RIGHT') === 'RIGHT');
+    if (!ovs.length) return null;
+    const superseded = x => ovs.some(y => y !== x && (y.startLine || y.line) <= (x.startLine || x.line) && y.line >= x.line && String(y.decidedAt || y.at || '') > String(x.decidedAt || x.at || ''));
+    const added = new Set(); (f.hunks || []).forEach(h => (h.lines || []).forEach(l => { if (l.t === 'a') added.add(l.n); }));
+    let add = f.add, del = f.del; const seen = new Set();
+    ovs.filter(x => !superseded(x)).forEach(x => {
+      const from = x.startLine || x.line, old = f.text ? f.text.slice(from - 1, x.line) : (x.old || []);
+      let oi = 0;
+      lineDiff(old, x.new || []).forEach(op => {
+        if (op[0] === 'a') { add++; return; }
+        const n = from + oi++; if (op[0] === 'c' || seen.has(n)) return; seen.add(n);
+        if (added.has(n)) add--; else del++;
+      });
+    });
+    return { add: Math.max(0, add), del };
+  }
+  // The PR's +/−, and next to it what is left on the review branch once a file's accepted changes are in.
+  function statHtml(pr, br) {
+    const s = (a, d) => '<span class="a">+' + a + '</span> <span class="d">−' + d + '</span>';
+    if (!br || (br.add === pr.add && br.del === pr.del)) return '<span class="stat">' + s(pr.add, pr.del) + '</span>';
+    return '<span class="stat" title="The PR changes +' + pr.add + ' −' + pr.del + '; the review branch, with your accepted changes, +' + br.add + ' −' + br.del + '"><s>' + s(pr.add, pr.del) + '</s> → ' + (br.add || br.del ? s(br.add, br.del) : 'no changes') + ' on the review branch</span>';
+  }
+
   function renderCommit() {
     const el = document.getElementById('commit');
     if (current < 0) { renderOverview(el); return; }
     const c = COMMITS[current];
-    const add = c.files.reduce((s, f) => s + f.add, 0), del = c.files.reduce((s, f) => s + f.del, 0);
-    el.innerHTML = '<h2 id="commit' + (current + 1) + '-' + esc(c.short) + '">' + esc(c.subject) + '</h2><div class="meta"><a class="sha" href="' + REPO + '/pull/' + PR_NUMBER + '/commits/' + c.sha + '" target="_blank" rel="noopener">' + esc(c.short) + '</a><span>' + c.files.length + ' files</span><span class="stat"><span class="a">+' + add + '</span> <span class="d">−' + del + '</span></span></div>' + (c.body ? '<p class="msg">' + esc(c.body) + '</p>' : '') + '<ul class="filelist">' + c.files.map(f => '<li><a href="#' + fileId(current, f.path) + '" data-jump="' + esc(fileId(current, f.path)) + '">' + esc(f.path) + '</a> <span class="stat"><span class="a">+' + f.add + '</span> <span class="d">−' + f.del + '</span></span></li>').join('') + '</ul>';
+    const add = c.files.reduce((s, f) => s + f.add, 0), del = c.files.reduce((s, f) => s + f.del, 0), bs = c.files.map(f => branchStat(c, f) || f);
+    const brTotal = bs.some((b, i) => b !== c.files[i]) ? { add: bs.reduce((s, b) => s + b.add, 0), del: bs.reduce((s, b) => s + b.del, 0) } : null;
+    el.innerHTML = '<h2 id="commit' + (current + 1) + '-' + esc(c.short) + '">' + esc(c.subject) + '</h2><div class="meta"><a class="sha" href="' + REPO + '/pull/' + PR_NUMBER + '/commits/' + c.sha + '" target="_blank" rel="noopener">' + esc(c.short) + '</a><span>' + c.files.length + ' files</span>' + statHtml({ add, del }, brTotal) + '</div>' + (c.body ? '<p class="msg">' + esc(c.body) + '</p>' : '') + '<ul class="filelist">' + c.files.map(f => '<li><a href="#' + fileId(current, f.path) + '" data-jump="' + esc(fileId(current, f.path)) + '">' + esc(f.path) + '</a> ' + statHtml(f, branchStat(c, f)) + '</li>').join('') + '</ul>';
     el.querySelectorAll('a[data-jump]').forEach(a => a.onclick = e => { e.preventDefault(); const t = document.getElementById(a.getAttribute('data-jump')); if (t) { t.classList.remove('collapsed'); const tg = t.querySelector('[data-toggle]'); if (tg) tg.textContent = '▾'; t.scrollIntoView({ block: 'start' }); } });
     const viewedCount = c.files.filter(f => lsGet('viewed:' + c.sha + ':' + f.path) === '1').length;
     const tb = document.createElement('div'); tb.className = 'toolbar';
@@ -750,7 +779,7 @@
       const viewed = lsGet(viewedKey) === '1';
       const sec = document.createElement('section'); sec.className = 'file' + ((viewed || COLLAPSED_DEFAULT.has(f.path)) ? ' collapsed' : ''); sec.id = fid;
       const head = document.createElement('div'); head.className = 'file-head'; head.id = fid + '-head';
-      head.innerHTML = '<button class="btn small" data-toggle aria-label="Toggle diff">' + (sec.classList.contains('collapsed') ? '▸' : '▾') + '</button><span class="path">' + esc(f.path) + '</span><span class="tag">' + ({ A: 'added', D: 'deleted', M: 'modified' })[f.status] + '</span><span class="stat"><span class="a">+' + f.add + '</span> <span class="d">−' + f.del + '</span></span><label><input type="checkbox" id="v-' + fid + '"' + (viewed ? ' checked' : '') + '> Viewed</label>';
+      head.innerHTML = '<button class="btn small" data-toggle aria-label="Toggle diff">' + (sec.classList.contains('collapsed') ? '▸' : '▾') + '</button><span class="path">' + esc(f.path) + '</span><span class="tag">' + ({ A: 'added', D: 'deleted', M: 'modified' })[f.status] + '</span>' + statHtml(f, branchStat(c, f)) + '<label><input type="checkbox" id="v-' + fid + '"' + (viewed ? ' checked' : '') + '> Viewed</label>';
       head.querySelector('[data-toggle]').onclick = () => { sec.classList.toggle('collapsed'); head.querySelector('[data-toggle]').textContent = sec.classList.contains('collapsed') ? '▸' : '▾'; };
       head.querySelector('input').onchange = e => { lsSet(viewedKey, e.target.checked ? '1' : '0'); sec.classList.toggle('collapsed', e.target.checked); head.querySelector('[data-toggle]').textContent = e.target.checked ? '▸' : '▾'; const p = document.querySelector('.progress b'); if (p) p.textContent = c.files.filter(x => lsGet('viewed:' + c.sha + ':' + x.path) === '1').length; renderStepper(); markStep(); };
       sec.appendChild(head);
