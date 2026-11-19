@@ -49,6 +49,19 @@
   // Outside the local app a reviewer thread can be marked resolved on this page only (d or its button; localStorage).
   const ghLocalRes = t => lsGet('ghres:' + t.id) === '1';
   const ghRes = t => !!t.resolved || ghLocalRes(t);
+  // Resolving a reviewer thread also settles what Claude said inside it: its answered conversations are dismissed and the
+  // discussions under Claude's replies folded; reopening it restores only what the resolve put away.
+  function settleAbout(t, resolve) {
+    const at = new Date().toISOString();
+    Object.values(threads).filter(x => x.about === t.id).forEach(x => {
+      if (resolve && !x.dismissed && x.status === 'answered') writeThread(x.id, { dismissed: true, dismissedByResolve: true, updatedAt: at }, false);
+      else if (!resolve && x.dismissedByResolve) writeThread(x.id, { dismissed: false, dismissedByResolve: false, updatedAt: at }, false);
+    });
+    Object.values(comments).filter(c => c.replyTo === t.id && (c.discussion || []).length).forEach(c => {
+      if (resolve && !c.discussionHidden) write(c.id, { discussionHidden: true, discHiddenByResolve: true });
+      else if (!resolve && c.discHiddenByResolve) write(c.id, { discussionHidden: false, discHiddenByResolve: false });
+    });
+  }
   function ghThreadCard(t) {
     const d = document.createElement('details'); d.className = 'ghthread'; d.id = 'ghs-' + t.id;
     d.open = ghOpen.has(t.id) || (!ghRes(t) && !ghClosed.has(t.id)) || !!(openComposer && openComposer.replyTo === t.id);
@@ -71,7 +84,7 @@
       else if (!t.resolved) {
         const on = ghLocalRes(t), r = document.createElement('button'); r.className = 'btn small'; r.dataset.act = on ? 'ghunresolve' : 'ghresolve';
         r.textContent = on ? 'Mark open' : 'Mark resolved'; r.title = 'On this page only; GitHub is not changed';
-        r.onclick = () => { lsSet('ghres:' + t.id, on ? '0' : '1'); if (on) { ghClosed.delete(t.id); } else { ghOpen.delete(t.id); ghClosed.add(t.id); } renderAll(); toast(on ? 'Thread marked open' : 'Thread marked resolved on this page'); };
+        r.onclick = () => { lsSet('ghres:' + t.id, on ? '0' : '1'); settleAbout(t, !on); if (on) { ghClosed.delete(t.id); } else { ghOpen.delete(t.id); ghClosed.add(t.id); } renderAll(); toast(on ? 'Thread marked open' : 'Thread marked resolved on this page'); };
         row.appendChild(r);
       }
       d.appendChild(row);
@@ -84,6 +97,7 @@
     const on = ghRes(t), r = document.createElement('button'); r.className = 'btn small'; r.dataset.act = on ? 'ghunresolve' : 'ghresolve';
     r.textContent = on ? 'Unresolve' : 'Resolve'; r.title = (on ? 'Reopen' : 'Resolve') + ' this thread here and on GitHub';
     r.onclick = async () => {
+      settleAbout(t, !on);
       if (on && !t.resolved) { lsSet('ghres:' + t.id, '0'); ghClosed.delete(t.id); renderAll(); toast('Thread marked open'); return; } // only resolved on this page
       if (on) { ghClosed.delete(t.id); } else { lsSet('ghres:' + t.id, '1'); ghOpen.delete(t.id); ghClosed.add(t.id); renderAll(); }
       toast((on ? 'Reopening' : 'Resolving') + ' on GitHub…');
