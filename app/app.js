@@ -7,6 +7,16 @@
     const l = document.getElementById('loadstatus'); if (l) l.remove(); }
   // Other reviewers' threads (anchored to the PR commit that last changed their line) and the PR conversation, snapshotted at build time.
   const GH = R.gh;
+  // GitHub comments in that snapshot, keyed 'r'<review comment id> / 'i'<issue comment id>. A posted doc
+  // already among them is shown only as that GitHub comment, inside its thread, not as a second card.
+  const GH_SEEN = new Map();
+  (GH.threads || []).forEach(t => (t.comments || []).forEach(c => { const m = /discussion_r(\d+)/.exec(c.url || ''); if (m) GH_SEEN.set('r' + m[1], { commit: t.commit, el: 'ghs-' + t.id }); }));
+  (GH.conversation || []).forEach(c => { const m = /issuecomment-(\d+)/.exec(c.url || ''); if (m) GH_SEEN.set('i' + m[1], { commit: null, el: 'conv-' + m[1] }); });
+  function ghSeenOf(d) {
+    if (!d || d.status !== 'posted') return null;
+    const m = /(discussion_r|issuecomment-)(\d+)/.exec(d.githubUrl || '');
+    return (d.githubCommentId && GH_SEEN.get((d.replyToConv ? 'i' : 'r') + d.githubCommentId)) || (m && GH_SEEN.get((m[1] === 'issuecomment-' ? 'i' : 'r') + m[2])) || null;
+  }
   // GitHub's bodyHTML is already sanitized; strip anything active again before rendering it.
   function cleanHTML(html) {
     const doc = new DOMParser().parseFromString('<div>' + (html || '') + '</div>', 'text/html');
@@ -195,8 +205,8 @@
     const msgs = (t.messages || []).map(m => '<div class="msg-row ' + m.role + '"><span class="who">' + (m.role === 'claude' ? 'Claude' : 'You') + '</span><div class="body">' + md(m.text) + '</div></div>').join('');
     const pending = t.status === 'asked' ? '<div class="pending">Waiting for Claude' + WAIT_DOTS + (t.shellThreadId || !t.notifyError ? '' : ' (not notified: tell Claude in chat to answer page questions)') + '</div>' : '';
     d.innerHTML = '<div class="card-head"><b>' + (t.draft === 'reply' ? 'Reply draft asked of Claude' : t.kind === 'modify' ? 'Change request to Claude' : t.kind === 'feedback' ? 'Feedback on the tool' : 'Conversation with Claude') + '</b>' + (t.path || t.kind === 'feedback' ? '' : '<span>commit-level</span>') + (t.dismissed ? '<span class="pill rejected">dismissed</span><button class="btn small dismiss" data-act="restore">Restore</button>' : t.status === 'answered' ? '<button class="btn small dismiss" data-act="dismiss" title="Hide this answered conversation; it can be restored from the queue">Dismiss</button>' : '') + '</div>' + msgs + pending + (t.commentId && comments[t.commentId] ? '<div class="made"><button class="btn small" data-act="gocomment">Go to the comment Claude drafted</button></div>' : '') + (t.changeId && changes[t.changeId] && changes[t.changeId].status !== 'landed' ? '<div class="made"><button class="btn small" data-act="gochange">Go to the proposed change</button></div>' : '') + '<div class="followup"><textarea id="fu-' + t.id + '" placeholder="Follow up"></textarea><button class="btn small ask" data-act="followup">Send</button></div>';
-    const gc = d.querySelector('[data-act="gocomment"]'); if (gc) gc.onclick = () => { const el = document.getElementById('cds-' + t.commentId); if (el) { setCursor(el, false); el.scrollIntoView({ block: 'center' }); flashRow(el); } };
-    const gch = d.querySelector('[data-act="gochange"]'); if (gch) gch.onclick = () => { const x = changes[t.changeId], sc = x && asComment(x); if (sc) jumpTo(onOv(sc) ? null : sc.commit, 'cds-' + sc.id); else jumpTo(x.commit, 'chg-' + t.changeId); };
+    const gc = d.querySelector('[data-act="gocomment"]'); if (gc) gc.onclick = () => { if (shadowed[t.commentId]) { jumpToDoc(shadowed[t.commentId]); return; } const el = document.getElementById('cds-' + t.commentId); if (el) { setCursor(el, false); el.scrollIntoView({ block: 'center' }); flashRow(el); } };
+    const gch = d.querySelector('[data-act="gochange"]'); if (gch) gch.onclick = () => { const x = changes[t.changeId], sc = x && asComment(x); if (sc) jumpToDoc(sc); else jumpTo(x.commit, 'chg-' + t.changeId); };
     d.querySelector('[data-act="followup"]').onclick = () => { const ta = d.querySelector('#fu-' + t.id); const v = ta.value.trim(); if (v) sendFollowUp(t, v, el); };
     const dm = d.querySelector('[data-act="dismiss"], [data-act="restore"]');
     if (dm) dm.onclick = () => writeThread(t.id, { dismissed: dm.dataset.act === 'dismiss', updatedAt: new Date().toISOString() }, false);
@@ -223,6 +233,7 @@
   }
   function askAbout(anchor) { openAsk = anchor; openComposer = null; editing = null; renderAll(); setTimeout(() => { const t = document.getElementById('ask-ta'); if (t) t.scrollIntoView({ block: 'center' }); }, 0); }
   let comments = {};           // id -> doc
+  let shadowed = {};           // id -> posted doc shown only as its GitHub comment (see ghSeenOf)
   let current = 0;             // commit index
   let openComposer = null;     // {commit, path, line, side} or {commit} for general
   let editing = null;          // comment id being edited
@@ -399,7 +410,7 @@
       if (tip.length) b.title = tip.join(' · ');
       b.onclick = () => go(i); el.appendChild(b);
     });
-    const all = Object.values(comments);
+    const all = Object.values(comments).concat(Object.values(shadowed));
     const n = s => all.filter(x => x.status === s).length;
     document.getElementById('counts').innerHTML = '<span class="pill proposed">' + n('proposed') + ' proposed</span><span class="pill queued">' + n('queued') + ' queued</span>' + (n('revise') ? '<span class="pill revise">' + n('revise') + ' with Claude</span>' : '') + (n('posted') ? '<span class="pill posted">' + n('posted') + ' posted</span>' : '') + (function () { const k = Object.values(changes).filter(x => x.status === 'proposed' || x.status === 'failed').length; return k ? '<span class="pill proposed">' + k + ' change' + (k > 1 ? 's' : '') + ' to decide</span>' : ''; })();
     document.getElementById('prev').disabled = current === -1;
@@ -478,7 +489,9 @@
     catch (e) { toast('Could not save: ' + (e && e.code || 'error')); return false; }
   }
   // On someone else's PR an accepted change lives on as its queued suggestion comment: one card shows both, not two.
-  const asComment = ch => !PR_MINE && ch.status === 'accepted' && ch.commentId && comments[ch.commentId] ? comments[ch.commentId] : null;
+  const asComment = ch => !PR_MINE && ch.status === 'accepted' && ch.commentId ? comments[ch.commentId] || shadowed[ch.commentId] || null : null;
+  // Jump to a comment doc's card, or to the GitHub comment that stands in for a posted one.
+  function jumpToDoc(c) { const s = ghSeenOf(c); if (s) jumpTo(s.commit, s.el); else jumpTo(onOv(c) ? null : c.commit, 'cds-' + c.id); }
   const chgOfComment = c => Object.values(changes).find(x => x.commentId === c.id && asComment(x)) || null;
   // The suggestion block of such a comment reads as the change's own old-to-new diff.
   function commentBody(c) {
@@ -625,7 +638,7 @@
       else if (act === 'withdrawrevchg') writeChange(ch.id, { note: null, noteAt: null }).then(ok => { if (ok) toast('Request withdrawn'); });
       else if (act === 'expand' && auto) { if (chgHidden.has(ch.id)) chgHidden.delete(ch.id); else chgHidden.add(ch.id); lsSet('chghidden', JSON.stringify(Array.from(chgHidden))); renderFiles(); }
       else if (act === 'expand') { if (chgOpen.has(ch.id)) chgOpen.delete(ch.id); else chgOpen.add(ch.id); renderFiles(); }
-      else if (act === 'gocomment') { const c = comments[ch.commentId]; if (c) jumpTo(onOv(c) ? null : c.commit, 'cds-' + c.id); else toast('The suggestion is not loaded yet'); }
+      else if (act === 'gocomment') { const c = comments[ch.commentId] || shadowed[ch.commentId]; if (c) jumpToDoc(c); else toast('The suggestion is not loaded yet'); }
     });
     return d;
   }
@@ -1677,8 +1690,8 @@
     };
     db.collection('comments').onSnapshot(snap => {
       // Tombstones (deleted while in the GitHub draft) wait for the sync, hidden.
-      const next = {}; snap.docs.forEach(d => { if (d.exists && !d.data().deleted) next[d.id] = reanchor(Object.assign({ id: d.id }, d.data())); });
-      comments = next; dbReady = true; renderAll(); restorePos();
+      const next = {}, hid = {}; snap.docs.forEach(d => { if (d.exists && !d.data().deleted) { const x = reanchor(Object.assign({ id: d.id }, d.data())); (ghSeenOf(x) ? hid : next)[d.id] = x; } });
+      comments = next; shadowed = hid; dbReady = true; renderAll(); restorePos();
     }, err => { document.getElementById('dbbanner').hidden = false; dbReady = true; renderQueue(); });
     db.collection('threads').onSnapshot(snap => {
       const next = {}; snap.docs.forEach(d => { if (d.exists) next[d.id] = reanchor(Object.assign({ id: d.id }, d.data())); });
