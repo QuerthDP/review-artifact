@@ -295,7 +295,21 @@ def ghsync(*extra):
     writes = json.loads(out[-1]) if out and out[-1].startswith('[') else []
     if 'RESTORE FAILED' in r.stdout + r.stderr: to_claude(None, '[ghsync restore failed] tell the user; see ' + os.path.join(STATE, 'server.log'))
     ok = commit_writes(writes)
-    if not all(ok): log('ghsync: some writes lost a version race; syncing again'); enqueue(github_sync)
+    if not all(ok):
+        # What a sync recorded about GitHub (the draft comment it made, what it holds) already happened there: keep it
+        # even when the page changed the doc meanwhile, or the next sync takes that comment for one made in GitHub's UI.
+        keep = [{'op': 'update', 'col': 'comments', 'id': w['doc_id'], 'data': gh_facts(w['data'])} for w, k in zip(writes, ok)
+                if not k and w['op'] == 'update' and gh_facts(w.get('data') or {})]
+        with lock:
+            keep = [w for w in keep if w['id'] in DB['docs']['comments']]
+            if keep: commit_writes(keep)
+        log('ghsync: some writes lost a version race; kept their GitHub state for', len(keep), 'doc(s); syncing again'); enqueue(github_sync)
+
+GH_FACTS = ('inDraft', 'githubCommentId', 'githubPath', 'githubQuote', 'githubAnchor', 'githubBody', 'githubUrl', 'deferred', 'githubPlan')
+def gh_facts(data):
+    f = {k: v for k, v in data.items() if k in GH_FACTS}
+    if data.get('status') == 'posted': f.update({k: data[k] for k in ('status', 'postedAt') if k in data})
+    return f
 
 def github_sync(): ghsync()
 
