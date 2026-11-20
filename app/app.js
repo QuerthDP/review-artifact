@@ -180,8 +180,9 @@
   async function sendQuestion(anchor, text, el) {
     if (sending) return; sending = true;
     const id = 'q_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
-    const t = { id, kind: anchor.kind || 'question', commit: anchor.commit, path: anchor.path || null, line: anchor.line || null, startLine: anchor.startLine || null, side: anchor.side || null, about: anchor.about || null, draft: anchor.draft || null, replyToConv: anchor.replyToConv || null, convAuthor: anchor.convAuthor || null, onChange: anchor.onChange || null, newLine: anchor.newLine || null, newStart: anchor.newStart != null ? anchor.newStart : null, newEnd: anchor.newEnd != null ? anchor.newEnd : null, status: 'asked', messages: [{ role: 'user', text, at: new Date().toISOString() }], createdAt: new Date().toISOString() };
-    const aboutNote = (anchor.aboutText ? '\n\n(about the comment: "' + anchor.aboutText.replace(/\s+/g, ' ').trim().slice(0, 300) + '")' : '')
+    const t = { id, kind: anchor.kind || 'question', commit: anchor.commit, path: anchor.path || null, line: anchor.line || null, startLine: anchor.startLine || null, side: anchor.side || null, about: anchor.about || null, draft: anchor.draft || null, target: anchor.target || null, replyToConv: anchor.replyToConv || null, convAuthor: anchor.convAuthor || null, onChange: anchor.onChange || null, newLine: anchor.newLine || null, newStart: anchor.newStart != null ? anchor.newStart : null, newEnd: anchor.newEnd != null ? anchor.newEnd : null, status: 'asked', messages: [{ role: 'user', text, at: new Date().toISOString() }], createdAt: new Date().toISOString() };
+    const aboutNote = (anchor.target === 'description' ? '\n\n(change the PR description: propose the new text as one change doc with op "description", not a commit change)' : '')
+      + (anchor.aboutText ? '\n\n(about the comment: "' + anchor.aboutText.replace(/\s+/g, ' ').trim().slice(0, 300) + '")' : '')
       + (anchor.draft === 'reply' ? '\n\n(draft a reply: propose it as a Claude comment doc replying to ' + (anchor.replyToConv ? 'PR conversation comment ' + anchor.replyToConv : 'reviewer thread ' + anchor.about) + ')' : '')
       + (anchor.onChange ? '\n\n(on ' + (anchor.newEnd != null && anchor.newEnd > anchor.newStart ? 'lines ' + (anchor.newStart + 1) + '-' + (anchor.newEnd + 1) : anchor.newStart != null ? 'line ' + (anchor.newStart + 1) : 'a line') + ' of the new lines accepted change ' + anchor.onChange + ' wrote, only on the review branch: "' + String(anchor.newLine || '').trim().slice(0, 600) + '")' : '');
     const shellThreadId = await notifyClaude(t, text + aboutNote, el, t.kind === 'modify' ? 'modify request' : t.kind === 'feedback' ? 'feedback request' : 'page question');
@@ -205,9 +206,9 @@
     if (anchor.kind !== 'feedback') noteDraftAt('a|' + draftKey(anchor), anchor);
     const d = document.createElement('div'); d.className = 'composer'; d.style.borderColor = 'var(--posted)';
     const where = anchor.path ? anchor.path + lineLabel(anchor) : 'commit ' + COMMITS[anchor.commitIdx].short;
-    const mod = anchor.kind === 'modify', fb = anchor.kind === 'feedback', rep = anchor.draft === 'reply';
-    const hint = rep ? 'Ask Claude to draft a reply' + (anchor.convAuthor ? ' to ' + esc(anchor.convAuthor) + ' in the PR conversation' : '') + ' · Claude proposes it as a card under the comment, to queue, revise or reject' : fb ? 'Claude writes it up and files an issue on <a href="https://github.com/' + FEEDBACK_REPO + '" target="_blank" rel="noopener">' + FEEDBACK_REPO + '</a>, then replies here with the issue link' : mod ? 'Ask Claude to change · ' + esc(where) + ' · ' + (PR_MINE ? 'Claude proposes the change as a card; Accept folds it into the commit and pushes the review branch to your fork' : 'Claude proposes the change as a card; Accept queues it as a GitHub suggestion') : 'Ask Claude · ' + esc(where) + ' · the question and answer stay here on the page';
-    d.innerHTML = '<div class="hint">' + hint + '</div><textarea id="ask-ta" data-draft="' + (fb ? 'fb' : 'a|' + esc(draftKey(anchor))) + '" placeholder="' + (rep ? 'What should the reply say? (optional; Enter sends)' : fb ?'What bothers you about the tool, or what is missing?' : mod ? (anchor.path ? 'What should change here?' : 'Reword the message, drop the commit, or rework it as a whole?') : 'What do you want to know about this code?') + '"></textarea><div class="actions"><button class="btn primary small" id="ask-send">' + (rep ? 'Ask Claude to draft it' : fb ? 'Send to Claude' : mod ? 'Ask Claude to change it' : 'Ask Claude') + '</button><button class="btn small" id="ask-cancel">Cancel</button></div>';
+    const mod = anchor.kind === 'modify', fb = anchor.kind === 'feedback', rep = anchor.draft === 'reply', dsc = mod && anchor.target === 'description';
+    const hint = dsc ? 'Ask Claude to change the PR description · Claude proposes the new text as a card under it' + (PR_BODY_APPLY ? '; Accept writes it to the PR on GitHub' : '; copy it from the card') : rep ? 'Ask Claude to draft a reply' + (anchor.convAuthor ? ' to ' + esc(anchor.convAuthor) + ' in the PR conversation' : '') + ' · Claude proposes it as a card under the comment, to queue, revise or reject' : fb ? 'Claude writes it up and files an issue on <a href="https://github.com/' + FEEDBACK_REPO + '" target="_blank" rel="noopener">' + FEEDBACK_REPO + '</a>, then replies here with the issue link' : mod ? 'Ask Claude to change · ' + esc(where) + ' · ' + (PR_MINE ? 'Claude proposes the change as a card; Accept folds it into the commit and pushes the review branch to your fork' : 'Claude proposes the change as a card; Accept queues it as a GitHub suggestion') : 'Ask Claude · ' + esc(where) + ' · the question and answer stay here on the page';
+    d.innerHTML = '<div class="hint">' + hint + '</div><textarea id="ask-ta" data-draft="' + (fb ? 'fb' : 'a|' + esc(draftKey(anchor))) + '" placeholder="' + (rep ? 'What should the reply say? (optional; Enter sends)' : fb ?'What bothers you about the tool, or what is missing?' : dsc ? 'How should the description change?' : mod ? (anchor.path ? 'What should change here?' : 'Reword the message, drop the commit, or rework it as a whole?') : 'What do you want to know about this code?') + '"></textarea><div class="actions"><button class="btn primary small" id="ask-send">' + (rep ? 'Ask Claude to draft it' : fb ? 'Send to Claude' : mod ? 'Ask Claude to change it' : 'Ask Claude') + '</button><button class="btn small" id="ask-cancel">Cancel</button></div>';
     if (mod) d.style.borderColor = 'var(--proposed)';
     d.querySelector('#ask-send').onclick = () => { const v = d.querySelector('#ask-ta').value.trim() || (rep ? 'Draft a reply to this comment.' : ''); if (v) sendQuestion(anchor, v, el); };
     d.querySelector('#ask-cancel').onclick = () => { dropDraft(fb ? 'fb' : 'a|' + draftKey(anchor)); openAsk = null; renderAll(); };
@@ -218,9 +219,9 @@
     const d = document.createElement('div'); d.className = 'chat'; d.id = 'chs-' + t.id;
     const msgs = (t.messages || []).map(m => '<div class="msg-row ' + m.role + '"><span class="who">' + (m.role === 'claude' ? 'Claude' : 'You') + '</span><div class="body">' + md(m.text) + '</div></div>').join('');
     const pending = t.status === 'asked' ? '<div class="pending">Waiting for Claude' + WAIT_DOTS + (t.shellThreadId || !t.notifyError ? '' : ' (not notified: tell Claude in chat to answer page questions)') + '</div>' : '';
-    d.innerHTML = '<div class="card-head"><b>' + (t.draft === 'reply' ? 'Reply draft asked of Claude' : t.kind === 'modify' ? 'Change request to Claude' : t.kind === 'feedback' ? 'Feedback on the tool' : 'Conversation with Claude') + '</b>' + (t.path || t.kind === 'feedback' ? '' : '<span>commit-level</span>') + (t.dismissed ? '<span class="pill rejected">dismissed</span><button class="btn small dismiss" data-act="restore">Restore</button>' : t.status === 'answered' ? '<button class="btn small dismiss" data-act="dismiss" title="Hide this answered conversation; it can be restored from the queue">Dismiss</button>' : '') + '</div>' + msgs + pending + (t.commentId && comments[t.commentId] ? '<div class="made"><button class="btn small" data-act="gocomment">Go to the comment Claude drafted</button></div>' : '') + (t.changeId && changes[t.changeId] && changes[t.changeId].status !== 'landed' ? '<div class="made"><button class="btn small" data-act="gochange">Go to the proposed change</button></div>' : '') + '<div class="followup"><textarea id="fu-' + t.id + '" placeholder="Follow up"></textarea><button class="btn small ask" data-act="followup">Send</button></div>';
+    d.innerHTML = '<div class="card-head"><b>' + (t.draft === 'reply' ? 'Reply draft asked of Claude' : t.kind === 'modify' ? 'Change request to Claude' : t.kind === 'feedback' ? 'Feedback on the tool' : 'Conversation with Claude') + '</b>' + (t.target === 'description' ? '<span>PR description</span>' : t.path || t.kind === 'feedback' ? '' : '<span>commit-level</span>') + (t.dismissed ? '<span class="pill rejected">dismissed</span><button class="btn small dismiss" data-act="restore">Restore</button>' : t.status === 'answered' ? '<button class="btn small dismiss" data-act="dismiss" title="Hide this answered conversation; it can be restored from the queue">Dismiss</button>' : '') + '</div>' + msgs + pending + (t.commentId && comments[t.commentId] ? '<div class="made"><button class="btn small" data-act="gocomment">Go to the comment Claude drafted</button></div>' : '') + (t.changeId && changes[t.changeId] && changes[t.changeId].status !== 'landed' ? '<div class="made"><button class="btn small" data-act="gochange">Go to the proposed change</button></div>' : '') + '<div class="followup"><textarea id="fu-' + t.id + '" placeholder="Follow up"></textarea><button class="btn small ask" data-act="followup">Send</button></div>';
     const gc = d.querySelector('[data-act="gocomment"]'); if (gc) gc.onclick = () => { if (shadowed[t.commentId]) { jumpToDoc(shadowed[t.commentId]); return; } const el = document.getElementById('cds-' + t.commentId); if (el) { setCursor(el, false); el.scrollIntoView({ block: 'center' }); flashRow(el); } };
-    const gch = d.querySelector('[data-act="gochange"]'); if (gch) gch.onclick = () => { const x = changes[t.changeId], sc = x && asComment(x); if (sc) jumpToDoc(sc); else jumpTo(x.commit, 'chg-' + t.changeId); };
+    const gch = d.querySelector('[data-act="gochange"]'); if (gch) gch.onclick = () => { const x = changes[t.changeId], sc = x && asComment(x); if (sc) jumpToDoc(sc); else jumpTo(isDescChg(x) ? null : x.commit, 'chg-' + t.changeId); };
     d.querySelector('[data-act="followup"]').onclick = () => { const ta = d.querySelector('#fu-' + t.id); const v = ta.value.trim(); if (v) sendFollowUp(t, v, el); };
     const dm = d.querySelector('[data-act="dismiss"], [data-act="restore"]');
     if (dm) dm.onclick = () => writeThread(t.id, { dismissed: dm.dataset.act === 'dismiss', updatedAt: new Date().toISOString() }, false);
@@ -397,7 +398,8 @@
       const oc = Object.values(comments).filter(onOv), ot = Object.values(threads).filter(t => onOv(t) && visibleThread(t));
       const p = oc.filter(x => x.status === 'proposed').length, q = oc.filter(x => x.status === 'queued').length;
       const wait = ot.filter(t => t.status !== 'answered').length, conv = ot.length - wait, nconv = (GH.conversation || []).length;
-      const kinds = [[p, 'proposed', 'proposed reply', 'proposed replies'], [q, 'queued', 'queued reply', 'queued replies'], [wait, 'wait', 'question waiting for Claude', 'questions waiting for Claude'], [conv, 'conv', 'conversation with Claude', 'conversations with Claude']];
+      const odec = Object.values(changes).filter(x => isDescChg(x) && (x.status === 'proposed' || x.status === 'failed')).length;
+      const kinds = [[p, 'proposed', 'proposed reply', 'proposed replies'], [q, 'queued', 'queued reply', 'queued replies'], [odec, 'chg', 'change to decide', 'changes to decide'], [wait, 'wait', 'question waiting for Claude', 'questions waiting for Claude'], [conv, 'conv', 'conversation with Claude', 'conversations with Claude']];
       const dots = kinds.map(k => ('<span class="dot ' + k[1] + '"></span>').repeat(Math.min(k[0], 8))).join('');
       const tip = ['PR description and conversation (' + nconv + ' comment' + (nconv === 1 ? '' : 's') + ')'].concat(kinds.filter(k => k[0]).map(k => k[0] + ' ' + (k[0] > 1 ? k[3] : k[2])));
       const b = document.createElement('button'); b.className = 'step ovstep' + (current === -1 ? ' active' : ''); b.dataset.ci = '-1'; b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', current === -1);
@@ -410,7 +412,7 @@
       // Besides Claude's comments, the dots show what still needs the viewer on this commit: changes to decide (amber square),
       // conversations with Claude (teal; an outline while Claude has not answered) and open reviewer threads (blue). Changes
       // already decided are not counted. The tooltip spells the counts out.
-      const chs = Object.values(changes).filter(x => x.commit === c.sha);
+      const chs = Object.values(changes).filter(x => x.commit === c.sha && !isDescChg(x));
       const decide = chs.filter(x => x.status === 'proposed' || x.status === 'failed').length;
       const ths = Object.values(threads).filter(t => t.commit === c.sha && t.kind !== 'feedback' && !t.dismissed && !onOv(t));
       const wait = ths.filter(t => t.status !== 'answered').length, conv = ths.length - wait;
@@ -522,8 +524,12 @@
     setTimeout(() => { let el = document.getElementById(id); if (!el && fallbacks) { for (const f of fallbacks) if ((el = document.getElementById(f))) { toast('Line not in this diff; showing its file'); break; } } if (!el) { toast('Not shown in this view'); return; } if (el.tagName === 'DETAILS') el.open = true; const sec = el.closest('.file'); if (sec) { sec.classList.remove('collapsed'); sec.hidden = false; const tg = sec.querySelector('[data-toggle]'); if (tg) tg.textContent = '▾'; } setCursor(el, false); el.scrollIntoView({ block: 'center' }); flashRow(el); }, 0);
   }
   // A change with no path acts on the whole commit: op "drop" removes it, op "reword" gives it a new message.
-  const chgWhere = ch => ch.path ? ch.path + lineLabel(ch) : 'commit ' + ((COMMITS.find(c => c.sha === ch.commit) || {}).short || String(ch.commit || '').slice(0, 10)) + (ch.op === 'drop' ? ' · drop' : ' · new message');
-  const commitChanges = sha => Object.values(changes).filter(x => x.commit === sha && !x.path && x.op && x.status !== 'landed');
+  // A change with op "description" (no path) proposes new PR description text, as line arrays old/new. It is drawn under the
+  // description on the overview, never on the review branch: Accept (own PR, local app) writes it to the PR body on GitHub.
+  const isDescChg = ch => !!ch && ch.op === 'description';
+  const PR_BODY_APPLY = PR_MINE && !!R.cfg.prBody;
+  const chgWhere = ch => isDescChg(ch) ? 'PR description' : ch.path ? ch.path + lineLabel(ch) : 'commit ' + ((COMMITS.find(c => c.sha === ch.commit) || {}).short || String(ch.commit || '').slice(0, 10)) + (ch.op === 'drop' ? ' · drop' : ' · new message');
+  const commitChanges = sha => Object.values(changes).filter(x => x.commit === sha && !x.path && x.op && !isDescChg(x) && x.status !== 'landed');
   // A commit an accepted change dropped from the review branch: marked next to its title and in the stepper.
   const isDropped = sha => Object.values(changes).some(x => x.commit === sha && !x.path && x.op === 'drop' && x.status === 'accepted');
   // A change shows only what it changes: a line diff of old and new, with two lines of context around each edit and the
@@ -551,6 +557,7 @@
     flush(); return html;
   }
   function miniDiff(ch) {
+    if (isDescChg(ch)) return '<div class="minidiff msgdiff">' + diffRows(ch.old || [], ch.new || [], esc, 2) + (ch.new && ch.new.length ? '' : '<div class="md-n">(the description is emptied)</div>') + '</div>';
     if (!ch.path && ch.op) {
       const cm = COMMITS.find(c => c.sha === ch.commit) || {}, oldMsg = ch.oldMessage || [cm.subject, cm.body].filter(Boolean).join('\n\n');
       if (ch.op === 'drop') return '<div class="minidiff msgdiff"><div class="md-d"><span class="marker">−</span>' + esc(cm.subject || oldMsg.split('\n')[0]) + '</div><div class="md-n">(the whole commit is dropped)</div></div>';
@@ -568,10 +575,10 @@
   const dismissOrigin = ch => { const t = ch.threadId && threads[ch.threadId]; if (t && !t.dismissed && t.status === 'answered') writeThread(t.id, { dismissed: true, updatedAt: new Date().toISOString() }, false); };
   // The changes Claude wrote for one request (one thread) go together: Accept takes them all, Revert undoes them all.
   const byIdNum = (a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
-  const groupOf = (ch, sts) => (ch.threadId ? Object.values(changes).filter(x => x.threadId === ch.threadId && x.id !== ch.id && sts.includes(x.status || 'proposed')) : []).concat([ch]).sort(byIdNum);
+  const groupOf = (ch, sts) => (ch.threadId ? Object.values(changes).filter(x => x.threadId === ch.threadId && x.id !== ch.id && isDescChg(x) === isDescChg(ch) && sts.includes(x.status || 'proposed')) : []).concat([ch]).sort(byIdNum);
   const acceptGroup = ch => groupOf(ch, ['proposed', 'failed']).filter(x => x.id === ch.id || !x.note);
-  const revertGroup = ch => groupOf(ch, ['accepted']).filter(x => x.keptAs || x.applied === false);
-  const canRevert = ch => PR_MINE && ch.status === 'accepted' && (ch.keptAs || ch.applied === false) && !ch.reverting;
+  const revertGroup = ch => isDescChg(ch) ? [ch] : groupOf(ch, ['accepted']).filter(x => x.keptAs || x.applied === false);
+  const canRevert = ch => PR_MINE && ch.status === 'accepted' && !ch.reverting && (isDescChg(ch) ? PR_BODY_APPLY && ch.applied === true : (ch.keptAs || ch.applied === false));
   async function acceptChange(ch, el) { for (const x of acceptGroup(ch)) await acceptOne(x, x.id === ch.id ? el : null); }
   // Revert undoes the change and the rest of its request on the review branch, as if they were never accepted (they turn
   // proposed again); changes accepted after them are folded in again. The server does it at once.
@@ -585,6 +592,7 @@
     if (chgBusy.has(ch.id)) return; chgBusy.add(ch.id);
     try {
       const at = new Date().toISOString();
+      if (isDescChg(ch) && !PR_BODY_APPLY) { toast('Copy the new text from the card'); return; }
       if (!PR_MINE) {
         const cid = 'sugg_' + ch.id, fence = '```';
         const body = (ch.reason || '') + (ch.path ? '\n\n' + fence + 'suggestion\n' + (ch.new || []).join('\n') + (ch.new && ch.new.length ? '\n' : '') + fence : ch.op === 'reword' ? '\n\nProposed commit message:\n\n' + String(ch.message || '').split('\n').map(l => '> ' + l).join('\n') : '\n\nThis commit could be dropped.');
@@ -619,18 +627,20 @@
     // A change Claude applied because the viewer asked for it stays open, so the viewer sees what changed and can revert it.
     const auto = st === 'accepted' && !!ch.autoApplied;
     const fold = (st === 'accepted' && !ch.revertError) || st === 'declined' || st === 'stale', folded = fold && (auto ? chgHidden.has(ch.id) : !chgOpen.has(ch.id));
-    const title = auto ? '<b>Applied at your request</b>' : st === 'accepted' ? '<b>Accepted</b>' : st === 'declined' ? '<b class="struck">Declined</b>' : st === 'stale' ? '<b>Not applied: the PR changed under it</b>' : ch.op === 'drop' && !ch.path ? '<b>Proposed: drop this commit</b>' : ch.op === 'reword' && !ch.path ? '<b>Proposed: new commit message</b>' : '<b>Proposed change</b>';
+    const title = auto ? '<b>Applied at your request</b>' : st === 'accepted' ? '<b>Accepted</b>' : st === 'declined' ? '<b class="struck">Declined</b>' : st === 'stale' ? '<b>Not applied: the PR changed under it</b>' : isDescChg(ch) ? (st === 'accepted' ? '<b>Applied to the PR description</b>' : '<b>Proposed: new PR description</b>') : ch.op === 'drop' && !ch.path ? '<b>Proposed: drop this commit</b>' : ch.op === 'reword' && !ch.path ? '<b>Proposed: new commit message</b>' : '<b>Proposed change</b>';
     const spill = st === 'accepting' ? '<span class="pill revise">accepting</span>' : st === 'failed' ? '<span class="pill warn">failed</span>' : st === 'proposed' ? '<span class="pill proposed">proposed</span>' + (ch.revertedAt ? '<span class="pill" title="Reverted on the review branch">reverted</span>' : '') : ch.reverting ? '<span class="pill revise">reverting' + WAIT_DOTS + '</span>' : '';
     const sha = esc((ch.newCommit || '').slice(0, 10)), br = esc(ch.branch || 'the review branch');
-    const pill = st !== 'accepted' ? '' : PR_MINE && ch.applied === false ? '<span class="pill revise" title="Claude is putting it on the review branch; no need to wait">applying' + WAIT_DOTS + '</span>' : !PR_MINE ? '<button class="pill queued linkbtn" data-act="gocomment" title="Go to the comment in your queue">' + (ch.path ? 'suggestion' : 'comment') + ' queued</button>' : ch.commitUrl ? '<a class="pill queued" href="' + esc(ch.commitUrl) + '" target="_blank" rel="noopener">' + (sha ? sha + ' on ' : 'on ') + br + '</a>' : '<span class="pill queued">' + (sha ? sha + ' on ' : 'on ') + br + '</span>';
-    const tip = PR_MINE ? (ch.path ? 'Claude folds it into the commit' : ch.op === 'drop' ? 'Claude drops the commit' : 'Claude rewrites the commit message') + ' and pushes the review branch to your fork' : ch.path ? 'Queues it as a GitHub suggestion in your pending review' : 'Queues it as a commit-level comment in your pending review';
+    const pill = st !== 'accepted' ? '' : isDescChg(ch) ? (ch.applied === false ? '<span class="pill revise">writing to GitHub' + WAIT_DOTS + '</span>' : '<span class="pill queued">on GitHub</span>') : PR_MINE && ch.applied === false ? '<span class="pill revise" title="Claude is putting it on the review branch; no need to wait">applying' + WAIT_DOTS + '</span>' : !PR_MINE ? '<button class="pill queued linkbtn" data-act="gocomment" title="Go to the comment in your queue">' + (ch.path ? 'suggestion' : 'comment') + ' queued</button>' : ch.commitUrl ? '<a class="pill queued" href="' + esc(ch.commitUrl) + '" target="_blank" rel="noopener">' + (sha ? sha + ' on ' : 'on ') + br + '</a>' : '<span class="pill queued">' + (sha ? sha + ' on ' : 'on ') + br + '</span>';
+    const tip = isDescChg(ch) ? 'Writes the new text to the PR description on GitHub, if it has not changed there since' : PR_MINE ? (ch.path ? 'Claude folds it into the commit' : ch.op === 'drop' ? 'Claude drops the commit' : 'Claude rewrites the commit message') + ' and pushes the review branch to your fork' : ch.path ? 'Queues it as a GitHub suggestion in your pending review' : 'Queues it as a commit-level comment in your pending review';
     const na = st === 'proposed' || st === 'failed' ? acceptGroup(ch).length : 1, nr = canRevert(ch) ? revertGroup(ch).length : 0;
     const acc = '<button class="btn primary small" data-act="accept" title="' + tip + (na > 1 ? ', with the other ' + (na - 1) + ' change' + (na > 2 ? 's' : '') + ' of this request' : '') + '">' + (st === 'failed' ? 'Retry' : 'Accept') + (na > 1 ? ' all ' + na : '') + '</button>', dec = '<button class="btn small" data-act="decline">Decline</button>';
     // Like a Claude comment, a change can go back to Claude with a note; it stays proposed (and cannot be accepted) until
     // Claude rewrites it, and the notes and Claude's replies stay on the card.
     const revising = !!ch.note, revEd = editing === 'chg:' + ch.id && !revising && (st === 'proposed' || st === 'failed');
     const rev = '<button class="btn small" data-act="revisechg">Ask Claude to revise</button>';
-    const acts = st === 'proposed' || st === 'failed' ? (revising ? '<button class="btn small" data-act="withdrawrevchg">Withdraw request</button>' + dec : revEd ? '' : acc + rev + dec) : st === 'declined' ? '<button class="btn small" data-act="restorechg">Restore</button>' : st === 'stale' ? dec : nr ? '<button class="btn small" data-act="revert" title="Undo ' + (nr > 1 ? 'these ' + nr + ' changes of one request' : 'it') + ' on the review branch, as if never accepted">Revert' + (nr > 1 ? ' all ' + nr : '') + '</button>' : '';
+    // A description change can always be copied; only the local app on the viewer's own PR can write it to GitHub.
+    const copy = isDescChg(ch) ? '<button class="btn small" data-act="copydesc" title="Copy the new description text">Copy text</button>' : '';
+    const acts = st === 'proposed' || st === 'failed' ? (revising ? '<button class="btn small" data-act="withdrawrevchg">Withdraw request</button>' + dec : revEd ? '' : (isDescChg(ch) && !PR_BODY_APPLY ? '' : acc) + copy + rev + dec) : st === 'declined' ? '<button class="btn small" data-act="restorechg">Restore</button>' : st === 'stale' ? dec : nr ? '<button class="btn small" data-act="revert" title="Undo ' + (nr > 1 ? 'these ' + nr + ' changes of one request' : 'it') + ' on the review branch, as if never accepted">Revert' + (nr > 1 ? ' all ' + nr : '') + '</button>' : '';
     const toggle = fold ? '<button class="btn small" data-act="expand">' + (folded ? 'Show change' : 'Hide change') + '</button>' : '';
     const wait = st === 'accepting' ? '<div class="pending">Waiting for Claude' + WAIT_DOTS + (ch.shellThreadId || !ch.notifyError ? '' : ' (not notified: tell Claude in chat to apply accepted changes)') + '</div>' : '';
     const err = st === 'failed' && ch.error ? '<div class="note chgerr">' + md(ch.error) + '</div>' : st === 'accepted' && ch.revertError ? '<div class="note chgerr">Revert failed: ' + md(ch.revertError) + '</div>' : '';
@@ -650,8 +660,9 @@
       else if (act === 'cancelrevchg') { editing = null; renderAll(); }
       else if (act === 'sendchgnote') { const v = document.getElementById('ta-chg-' + ch.id).value.trim(); if (v) sendChangeNote(ch, v, d); }
       else if (act === 'withdrawrevchg') writeChange(ch.id, { note: null, noteAt: null }).then(ok => { if (ok) toast('Request withdrawn'); });
-      else if (act === 'expand' && auto) { if (chgHidden.has(ch.id)) chgHidden.delete(ch.id); else chgHidden.add(ch.id); lsSet('chghidden', JSON.stringify(Array.from(chgHidden))); renderFiles(); }
-      else if (act === 'expand') { if (chgOpen.has(ch.id)) chgOpen.delete(ch.id); else chgOpen.add(ch.id); renderFiles(); }
+      else if (act === 'expand' && auto) { if (chgHidden.has(ch.id)) chgHidden.delete(ch.id); else chgHidden.add(ch.id); lsSet('chghidden', JSON.stringify(Array.from(chgHidden))); if (isDescChg(ch)) renderAll(); else renderFiles(); }
+      else if (act === 'expand') { if (chgOpen.has(ch.id)) chgOpen.delete(ch.id); else chgOpen.add(ch.id); if (isDescChg(ch)) renderAll(); else renderFiles(); }
+      else if (act === 'copydesc') { const txt = (ch.new || []).join('\n'); (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('New description copied'), () => toast('Could not copy; select the text on the card')); }
       else if (act === 'gocomment') { const c = comments[ch.commentId] || shadowed[ch.commentId]; if (c) jumpToDoc(c); else toast('The suggestion is not loaded yet'); }
     });
     return d;
@@ -659,7 +670,7 @@
   // On the viewer's PR, accepted changes sit on the review branch, not on the PR yet: say so under the top bar.
   function renderChangeBanner() {
     const el = document.getElementById('chgbanner'); if (!el) return;
-    const acc = PR_MINE ? Object.values(changes).filter(x => x.status === 'accepted') : [];
+    const acc = PR_MINE ? Object.values(changes).filter(x => x.status === 'accepted' && !isDescChg(x)) : [];
     el.hidden = !acc.length; if (!acc.length) { el.innerHTML = ''; return; }
     const last = acc.slice().sort((a, b) => String(b.at || b.decidedAt || '').localeCompare(String(a.at || a.decidedAt || '')))[0];
     el.innerHTML = acc.length + ' accepted change' + (acc.length > 1 ? 's' : '') + ' on <code>' + esc(last.branch || 'the review branch') + '</code>, not on the PR yet' + (last.compareUrl ? ' · <a href="' + esc(last.compareUrl) + '" target="_blank" rel="noopener">Compare</a>' : '') + (acc.some(x => x.applied === false) ? ' · applying ' + acc.filter(x => x.applied === false).length + '…' : ' · <b>Push to the PR</b> when you approve');
@@ -692,6 +703,7 @@
       const body = isDesc && !c.html ? '<span class="empty">No description provided.</span>' : cleanHTML(c.html);
       d.innerHTML = '<summary class="card-head"><b>' + esc(c.author) + '</b><span>' + esc(c.kind) + ' · ' + esc((c.at || '').slice(0, 10)) + '</span><a href="' + esc(c.url) + '" target="_blank" rel="noopener">open on GitHub</a></summary><div class="ghc"><div class="ghbody">' + body + '</div></div>';
       Object.values(comments).filter(x => x.replyToConv === c.url).forEach(x => d.appendChild(card(x)));
+      if (isDesc) Object.values(changes).filter(x => isDescChg(x) && x.status !== 'landed').sort(byIdNum).forEach(x => d.appendChild(changeCard(x)));
       aboutChats(c.url, d).forEach(x => d.appendChild(x));
       if (openComposer && openComposer.replyToConv === c.url) d.appendChild(composer(openComposer));
       else {
@@ -701,6 +713,11 @@
         row.appendChild(draftReplyBtn({ commit: c0.sha, commitIdx: 0, about: c.url, aboutText: convText(c), replyToConv: c.url, convAuthor: c.author }));
         const a = document.createElement('button'); a.className = 'btn small ask'; a.textContent = '? Ask Claude about it'; a.title = 'Ask Claude a question about this ' + (isDesc ? 'description' : 'comment') + ' (i)';
         a.onclick = () => askAbout({ commit: c0.sha, commitIdx: 0, about: c.url, aboutText: convText(c) }); row.appendChild(a);
+        if (isDesc) {
+          const m = document.createElement('button'); m.className = 'btn small'; m.style.color = 'var(--proposed)'; m.style.borderColor = 'var(--proposed)'; m.dataset.act = 'descmod';
+          m.textContent = '✎ Ask Claude to change it'; m.title = 'Claude proposes new description text as a card' + (PR_BODY_APPLY ? '; Accept writes it to the PR' : ' to copy') + ' (m)';
+          m.onclick = () => askAbout({ commit: c0.sha, commitIdx: 0, about: c.url, aboutText: convText(c), kind: 'modify', target: 'description' }); row.appendChild(m);
+        }
         d.appendChild(row);
       }
       return d;
@@ -1027,8 +1044,8 @@
       const g = document.createElement('div'); g.className = 'qgroup'; g.innerHTML = '<h3><span class="pill proposed">' + pendChg.length + '</span>Proposed changes</h3>';
       pendChg.forEach(x => {
         const ci = COMMITS.findIndex(c => c.sha === x.commit), b = document.createElement('button'); b.className = 'qitem';
-        b.innerHTML = '<div class="where">' + (ci + 1) + ' · ' + esc(chgWhere(x)) + (x.status === 'failed' ? ' · failed' : '') + '</div><div class="snip">' + esc(String(x.reason || (x.new || [])[0] || x.message || '').split('\n')[0]) + '</div>';
-        b.onclick = () => jumpTo(x.commit, 'chg-' + x.id, ['commit']); g.appendChild(b);
+        b.innerHTML = '<div class="where">' + (isDescChg(x) ? 'PR' : ci + 1) + ' · ' + esc(chgWhere(x)) + (x.status === 'failed' ? ' · failed' : '') + '</div><div class="snip">' + esc(String(x.reason || (x.new || [])[0] || x.message || '').split('\n')[0]) + '</div>';
+        b.onclick = () => isDescChg(x) ? jumpTo(null, 'chg-' + x.id, ['prdesc']) : jumpTo(x.commit, 'chg-' + x.id, ['commit']); g.appendChild(b);
       });
       el.appendChild(g);
     }
@@ -1144,7 +1161,7 @@
   }
   // Own PR: force-push the review branch (every accepted change) onto the PR branch on the fork, and post queued replies with it.
   function renderPushPanel(p, nQueued, conv, syncing) {
-    const acc = Object.values(changes).filter(x => x.status === 'accepted'), applying = acc.filter(x => x.applied === false).length;
+    const acc = Object.values(changes).filter(x => x.status === 'accepted' && !isDescChg(x)), applying = acc.filter(x => x.applied === false).length;
     const br = esc((acc.find(x => x.branch) || {}).branch || 'review/pr-' + PR_NUMBER), posts = nQueued + conv;
     p.innerHTML = '<div class="fbpanel-head"><b>Push to the PR</b><button class="btn small" aria-label="Close">✕</button></div>' +
       '<div class="hint">' + (acc.length ? acc.length + ' accepted change' + (acc.length === 1 ? '' : 's') + ' on <code>' + br + '</code>' + (applying ? ' · ' + applying + ' still applying' : '') + '; Claude force-pushes it onto the PR branch on your fork (never upstream).' : 'No accepted changes to push.') + (posts ? ' ' + posts + ' queued repl' + (posts === 1 ? 'y is' : 'ies are') + ' posted with it.' : '') + (syncing ? ' ' + syncing + ' still syncing.' : '') + '</div>' +
@@ -1460,6 +1477,10 @@
       const cv = item && item.matches('.prconv') && convItems().find(x => x.url === item.dataset.url);
       if (cv) { askAbout({ commit: COMMITS[0].sha, commitIdx: 0, about: cv.url, aboutText: convText(cv) }); return; }
       if (gt) { const gb = item.querySelector('.ghbody'); askAbout({ commit: gt.commit, commitIdx: current, path: gt.path || null, line: gt.line || null, side: gt.side || null, about: gt.id, aboutText: gb ? gb.textContent : '' }); return; }
+    }
+    if (sel === '.modbtn') {
+      const at = lastCmt || current_(), pc = at && at.closest ? at.closest('.prconv') : null;
+      if (pc) { const b = pc.querySelector(':scope > .actions [data-act="descmod"]'); if (b) b.click(); else toast(pc.classList.contains('prdesc') ? 'Close the open box first' : 'Only the PR description can be changed; a asks Claude to draft a reply'); return; }
     }
     const cur = lineOf(current_());
     if (cur && cur.classList.contains('gstop')) { const b = document.querySelector(sel === '.askbtn' ? '#commit [data-i]' : sel === '.addbtn' ? '#commit [data-k]' : sel === '.modbtn' ? '#commit [data-m]' : null); if (b) b.click(); else toast('Not available at commit level'); return; }

@@ -55,7 +55,9 @@ elif cmd == 'wait':
 elif cmd == 'apply':
     import time
     if not call('review').get('mine'): sys.exit('not the user\'s own PR: leave the changes proposed')
+    descs = {i for i, d in call('db?since=-1')['docs']['changes'].items() if d.get('op') == 'description'}
     for i in a[1:]:
+        if i in descs: print('skipping', i, '(a PR description change waits for the user\'s Accept)'); continue
         at = time.strftime('%Y-%m-%dT%H:%M:%S.000Z', time.gmtime())
         r = call('db', {'op': 'update', 'col': 'changes', 'id': i, 'data': {'status': 'accepted', 'applied': False, 'autoApplied': True, 'decidedAt': at, 'error': {'__delete__': True}}})
         if not all(r['ok']): sys.exit(f'{i}: version conflict')

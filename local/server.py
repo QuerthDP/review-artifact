@@ -9,7 +9,7 @@ server for the PR already runs, it is reused (the line says "reused": true). --p
 
 The page is the same code as the claude.ai review artifact. The server stands in for the artifact platform: it keeps the
 page's comments/threads/changes collections in <state>/db.json, and every request the page sends to Claude arrives here.
-Mechanical requests run at once on this machine (accepting a change on the review branch, pushing it to the user's fork,
+Mechanical requests run at once on this machine (accepting a change on the review branch or to the PR description, pushing it to the user's fork,
 GitHub sync, submitting the review, posting conversation replies). The rest (questions, change and revision requests,
 feedback, review requests, a new PR head) go to <state>/inbox.jsonl, one JSON line each, for the Claude agent answering
 the page: it takes them with "store.py next" and answers by writing docs back through store.py.
@@ -155,7 +155,7 @@ def build():
     try: collapsed = json.load(open(os.path.join(STATE, 'collapsed.json')))
     except FileNotFoundError: collapsed = ['Cargo.lock', 'package-lock.json', 'yarn.lock', 'go.sum']
     REVIEW.update(reviewVersion=head, ghVersion=pr.get('updated_at') or '', ghSeen=pr.get('updated_at') or '', base=base, headRef=head_ref, headRepo=(pr['head']['repo'] or {}).get('full_name'), state=pr['state'],
-                  data={'cfg': {'repo': SLUG, 'pr': N, 'session': SESSION, 'collapsed': collapsed, 'local': True},
+                  data={'cfg': {'repo': SLUG, 'pr': N, 'session': SESSION, 'collapsed': collapsed, 'local': True, 'prBody': True},
                         'pr': {'title': pr['title'], 'author': pr['user']['login'], 'head': head},
                         'mine': pr['user']['login'] == LOGIN, 'commits': json.load(open(diff)), 'gh': json.load(open(ghp))})
     log('built', head[:10], 'base', base[:10])
@@ -427,9 +427,42 @@ def push_branch(datas):
         if data.get('newCommit'): data['commitUrl'] = f"https://github.com/{LOGIN}/{NAME}/commit/{data['newCommit']}"
         data['compareUrl'] = f"https://github.com/{SLUG}/compare/{REVIEW['headRef']}...{LOGIN}:{BRANCH}"
 
+def text_of(v): return v if isinstance(v, str) else '\n'.join(v or [])
+
+def write_description(frm, to):
+    """Replaces the PR description with `to`, only on the user's own PR and only while GitHub still has `frm` (line ends
+    and trailing blank space aside), then reloads the page's GitHub data."""
+    if not REVIEW['data']['mine']: raise RuntimeError('only the description of your own PR can be changed')
+    norm = lambda t: (t or '').replace('\r\n', '\n').rstrip()
+    if norm(gh_json(f'repos/{SLUG}/pulls/{N}').get('body')) != norm(frm):
+        raise RuntimeError('the description changed on GitHub since this text was proposed; ask Claude to revise it')
+    pr = json.loads(run('gh', 'api', '-X', 'PATCH', f'repos/{SLUG}/pulls/{N}', '-f', f'body={to}'))
+    try: refresh_gh(pr.get('updated_at') or '')
+    except Exception as e: log('GitHub data refresh after the description edit failed:', e)
+
+def accept_description(cid, ch):
+    try:
+        write_description(text_of(ch.get('old')), text_of(ch.get('new')))
+        commit_writes([{'op': 'update', 'col': 'changes', 'id': cid, 'data': {'status': 'accepted', 'applied': True, 'error': DEL}}])
+        log('PR description replaced by', cid)
+    except Exception as e:
+        commit_writes([{'op': 'update', 'col': 'changes', 'id': cid, 'data': {'status': 'failed', 'applied': DEL, 'error': str(e)[:300]}}])
+        log('description change failed', cid, e)
+
+def revert_description(cid, ch):
+    try:
+        write_description(text_of(ch.get('new')), text_of(ch.get('old')))
+        at = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        commit_writes([{'op': 'update', 'col': 'changes', 'id': cid, 'data': {'status': 'proposed', 'revertedAt': at, 'applied': DEL, 'decidedAt': DEL, 'autoApplied': DEL, 'reverting': DEL, 'revertError': DEL, 'error': DEL}}])
+        log('PR description restored from', cid)
+    except Exception as e:
+        commit_writes([{'op': 'update', 'col': 'changes', 'id': cid, 'data': {'reverting': DEL, 'revertError': str(e)[:300]}}])
+        log('description revert failed', cid, e)
+
 def accept_change(cid):
     ch = DB['docs']['changes'].get(cid)
     if not ch or ch.get('applied') or ch.get('status') not in ('accepted', 'accepting'): return
+    if ch.get('op') == 'description': return accept_description(cid, ch)
     if not REVIEW['data']['mine']:
         if not ch.get('commentId'): to_claude(None, f'[accept change {cid}] someone else\'s PR, change accepted without a suggestion comment')
         return
@@ -454,10 +487,11 @@ def revert_change(cid):
     They go back to proposed. If a later change no longer applies without them, nothing changes and the card says why."""
     changes = DB['docs']['changes']; ch = changes.get(cid)
     if not ch or not ch.get('reverting'): return
+    if ch.get('op') == 'description': return revert_description(cid, ch)
     tid = ch.get('threadId')
-    group = [i for i, d in changes.items() if i == cid or (tid and d.get('threadId') == tid and d.get('status') == 'accepted' and d.get('applied'))]
+    group = [i for i, d in changes.items() if i == cid or (tid and d.get('threadId') == tid and d.get('status') == 'accepted' and d.get('applied') and d.get('op') != 'description')]
     clear = lambda extra: [{'op': 'update', 'col': 'changes', 'id': i, 'data': dict({'reverting': DEL}, **extra)} for i in group]
-    applied = {i: d for i, d in changes.items() if d.get('status') == 'accepted' and d.get('applied')}
+    applied = {i: d for i, d in changes.items() if d.get('status') == 'accepted' and d.get('applied') and d.get('op') != 'description'}
     why = (None if REVIEW['data']['mine'] else 'only a change on your own PR can be reverted') or \
           next((f'{i} is not on the review branch' for i in group if i not in applied), None) or \
           next((f'{i} was accepted before Revert existed, so its place in the series is not known' for i, d in applied.items() if not d.get('keptAs')), None)
